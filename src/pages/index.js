@@ -84,10 +84,10 @@ const fitCards = [
   {
     title: 'Good fit',
     items: [
-      'The Raft log of a Kommander node',
-      'The storage of a Kahuna node, with no native library',
       'Embedded, ordered key-value data inside a .NET service',
       'Services that want a storage engine they can read and debug in C#',
+      'The Raft log of a Kommander node',
+      'The storage of a Kahuna node, with no native library',
     ],
   },
   {
@@ -101,16 +101,37 @@ const fitCards = [
   },
 ];
 
+const projectUrls = {
+  Kommander: 'https://kahunakv.github.io/kommander.github.io/',
+  Kahuna: 'https://kahunakv.github.io/',
+};
+
+// Links each mention of Kommander and Kahuna in a text. A package name, such as Solarium.Kommander,
+// stays plain text.
+function withProjectLinks(text) {
+  return text.split(/(?<!\.)\b(Kommander|Kahuna)\b/).map((part, index) =>
+    index % 2 === 1 ? (
+      <Link key={index} className={styles.projectLink} to={projectUrls[part]}>
+        {part}
+      </Link>
+    ) : (
+      part
+    ),
+  );
+}
+
 const integrations = [
   {
     name: 'Solarium.Kommander',
     to: '/docs/integrations/kommander',
+    linkLabel: 'Read about Solarium.Kommander',
     description:
       'SolariumWAL, a Kommander IWAL. Pass it to RaftManager, with no change to Kommander and no native library.',
   },
   {
     name: 'Solarium.Kahuna',
     to: '/docs/integrations/kahuna',
+    linkLabel: 'Read about Solarium.Kahuna',
     description:
       'The persistence backend and the Raft WAL of a Kahuna node, loaded with --extension-assembly.',
   },
@@ -243,9 +264,9 @@ function SectionHeading({eyebrow, title, subtitle}) {
     <div className={styles.sectionHeading}>
       <p className={styles.sectionEyebrow}>{eyebrow}</p>
       <Heading as="h2" className={styles.sectionTitle}>
-        {title}
+        {withProjectLinks(title)}
       </Heading>
-      {subtitle ? <p className={styles.sectionSubtitle}>{subtitle}</p> : null}
+      {subtitle ? <p className={styles.sectionSubtitle}>{withProjectLinks(subtitle)}</p> : null}
     </div>
   );
 }
@@ -345,9 +366,9 @@ export default function Home() {
               {advantageCards.map((card) => (
                 <div key={card.title} className={styles.advantageCard}>
                   <Heading as="h3" className={styles.cardTitle}>
-                    {card.title}
+                    {withProjectLinks(card.title)}
                   </Heading>
-                  <p className={styles.cardDescription}>{card.description}</p>
+                  <p className={styles.cardDescription}>{withProjectLinks(card.description)}</p>
                 </div>
               ))}
             </div>
@@ -363,12 +384,15 @@ export default function Home() {
             />
             <div className={styles.usedByGrid}>
               {integrations.map((project) => (
-                <Link key={project.name} className={styles.usedByCard} to={project.to}>
+                <div key={project.name} className={styles.usedByCard}>
                   <Heading as="h3" className={styles.cardTitle}>
                     {project.name}
                   </Heading>
-                  <p className={styles.cardDescription}>{project.description}</p>
-                </Link>
+                  <p className={styles.cardDescription}>{withProjectLinks(project.description)}</p>
+                  <Link className={styles.inlineLink} to={project.to}>
+                    {project.linkLabel}
+                  </Link>
+                </div>
               ))}
             </div>
           </div>
@@ -385,9 +409,9 @@ export default function Home() {
               {testingCards.map((card) => (
                 <div key={card.title} className={styles.calloutCard}>
                   <Heading as="h3" className={styles.cardTitle}>
-                    {card.title}
+                    {withProjectLinks(card.title)}
                   </Heading>
-                  <p className={styles.cardDescription}>{card.description}</p>
+                  <p className={styles.cardDescription}>{withProjectLinks(card.description)}</p>
                   <Link className={styles.inlineLink} to={card.to}>
                     {card.linkLabel}
                   </Link>
@@ -408,11 +432,11 @@ export default function Home() {
               {fitCards.map((card) => (
                 <div key={card.title} className={styles.fitCard}>
                   <Heading as="h3" className={styles.cardTitle}>
-                    {card.title}
+                    {withProjectLinks(card.title)}
                   </Heading>
                   <ul className={styles.fitList}>
                     {card.items.map((item) => (
-                      <li key={item}>{item}</li>
+                      <li key={item}>{withProjectLinks(item)}</li>
                     ))}
                   </ul>
                 </div>

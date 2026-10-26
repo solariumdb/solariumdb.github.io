@@ -5,6 +5,7 @@ const sidebars = {
   tutorialSidebar: [
     'intro',
     'why-solarium',
+    'concepts',
     'getting-started',
     {
       type: 'category',

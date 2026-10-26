@@ -115,6 +115,7 @@ db.DeleteRange("log:0000"u8, "log:0001"u8);
 | If you want to | Read |
 | --- | --- |
 | Know why Solarium exists and when to use it | [Why Solarium](why-solarium.md) |
+| Learn the storage terms that these docs use | [Key Concepts](concepts.md) |
 | Open a database and write your first batch | [Getting Started](getting-started.md) |
 | Use Solarium as the Raft log of Kommander | [Solarium.Kommander](integrations/kommander.md) |
 | Run a Kahuna node on Solarium | [Solarium.Kahuna](integrations/kahuna.md) |
