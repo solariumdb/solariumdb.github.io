@@ -4,7 +4,9 @@ sidebar_position: 6
 
 # Checkpoints
 
-A checkpoint is a consistent copy of the database in a new directory. The copy shows every column family as of one sequence number. You can open it as a database, back it up, or send it to another node.
+A checkpoint gives you a consistent copy of a live database in a new directory, while writes continue. Use it for a backup, or to send a copy of the data to another node. The copy shares the SSTables of the source through hard links, so it is fast: in the Kahuna benchmark, a checkpoint of about 2 GB of values took 0.10 s.
+
+The copy shows every column family as of one sequence number. You can open it as a database.
 
 ## Create a checkpoint
 
@@ -28,6 +30,24 @@ The rules:
 4. It writes the `MANIFEST` of the copy, which lists those tables and no WAL file.
 5. It writes `FORMAT`, the last file.
 
+```mermaid
+flowchart LR
+    subgraph Source[Source directory]
+        SM[Memtables]
+        S1[000012.sst]
+        S2[000015.sst]
+    end
+    subgraph Copy[Checkpoint directory]
+        C0[New level 0 SSTable]
+        C1[000012.sst]
+        C2[000015.sst]
+        CM[MANIFEST, then FORMAT]
+    end
+    SM -- entries at or below the sequence number --> C0
+    S1 -. hard link .- C1
+    S2 -. hard link .- C2
+```
+
 An SSTable never changes after the manifest names it, and a delete removes only one name. So the copy and the source share each file safely.
 
 When the file system refuses a link, for example because the copy is on another file system, the checkpoint copies that table and every later one.
@@ -48,8 +68,4 @@ A checkpoint writes only the memtables. Everything else is a hard link. In the K
 
 On a different file system, the checkpoint copies every table, and its time grows with the size of the store.
 
-## Differences from RocksDB
-
-- RocksDB copies its WAL files into the checkpoint while they are small, and otherwise flushes the source memtables. Solarium writes the memtables to new SSTables of the copy, and never flushes the source.
-- RocksDB builds the checkpoint in a `.tmp` directory and renames it. Solarium writes `FORMAT` last instead.
-- With RocksDB, closing the database during a checkpoint is an error of the caller. Solarium stops the checkpoint and waits for it.
+A checkpoint differs from one in RocksDB in three ways: it holds no WAL file, it never flushes the source, and `Dispose` stops it safely. See [Differences from RocksDB](../reference/rocksdb-differences.md#checkpoints).

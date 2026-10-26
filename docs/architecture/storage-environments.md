@@ -4,7 +4,7 @@ sidebar_position: 10
 
 # Storage Environments
 
-All file I/O of Solarium goes through a **storage environment**, as with the `Env` and `FileSystem` of RocksDB. The engine never opens, deletes, or renames a file directly, except for the `LOCK` file. This makes three things possible: a portable default, an io_uring environment for Linux, and test environments that simulate a power loss.
+All file I/O of Solarium goes through a **storage environment**, as with the `Env` and `FileSystem` of RocksDB. The engine never opens, deletes, or renames a file directly, except for the `LOCK` file. This makes three things possible: a portable default, an io_uring storage environment for Linux, and test environments that simulate a power loss.
 
 ## The interfaces
 
@@ -26,7 +26,9 @@ A deleted, renamed, linked, or created entry is durable only after `FlushDirecto
 
 All members except `Name` and `OpenFile` have default implementations, on the file APIs of .NET, and on libc or Win32 for the link and the directory fsync. An environment overrides them to observe or change them.
 
-`IStorageFile` is one open file: positional `Read` and `Write`, `Flush`, `GetLength`, `SetLength`, and `Dispose`.
+`IStorageFile` is one open file: positional `Read` and `Write`, `Flush`, `SyncRange`, `GetLength`, `SetLength`, and `Dispose`.
+
+`SyncRange(offset, length)` starts the writeback of a range to the device and does not wait for it, as the `RangeSync` of RocksDB. It makes nothing durable. A flush or a compaction calls it every `BytesPerSync` bytes of an SSTable. Its default does nothing. Both environments call `sync_file_range(SYNC_FILE_RANGE_WRITE)` on Linux. The io_uring storage environment calls it on the calling thread, because the reactor has no such operation. Elsewhere, it does nothing.
 
 ## The environments
 
@@ -39,7 +41,7 @@ The host owns an environment, and disposes it after every database that uses it 
 
 ## Why io_uring is not faster here
 
-The engine issues one operation at a time. Every read and write in the io_uring environment is a hand-off to the reactor thread, and the hand-off costs more than the system call that it replaces. Measured on Linux 6.1 with ext4 on an NVMe drive:
+The engine issues one operation at a time. Every read and write in the io_uring storage environment is a hand-off to the reactor thread, and the hand-off costs more than the system call that it replaces. Measured on Linux 6.1 with ext4 on an NVMe drive:
 
 - A 4 KB read from the page cache takes 2.6 µs instead of 0.4 µs. The kernel completes it inline, so the extra cost is the hand-off alone, about 2.3 µs.
 - A 4 KB write takes 6.9 µs instead of 1.5 µs, and a 64 KB write 29 µs instead of 20 µs. On this kernel, io_uring cannot complete a buffered ext4 write inline. It passes the write to one of its worker threads (`iou-wrk`), and the extra cost grows with the size of the write.

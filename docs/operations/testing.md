@@ -12,7 +12,7 @@ The tests of a storage engine must prove two things: that it gives the right ans
 dotnet test
 ```
 
-The storage, SSTable, and database tests take the storage environment as a parameter. On Linux with io_uring, they run once for each environment. Without io_uring, the suite runs the default environment only and still passes.
+The storage, SSTable, and database tests take the storage environment as a parameter. On Linux with io_uring, they run once for each environment. Without io_uring, the suite runs the default storage environment only and still passes.
 
 ## Test io_uring from macOS or Windows
 
@@ -27,8 +27,8 @@ Docker needs both flags. The default seccomp profile blocks io_uring, and each r
 
 ## Continuous integration
 
-- `.github/workflows/ci.yml` runs on Linux. It fails when a test ran on the default environment but not on io_uring.
-- `.github/workflows/windows.yml` runs the suite on Windows, on the default environment, when you start it by hand. Windows enforces file share modes and has no directory fsync.
+- `.github/workflows/ci.yml` runs on Linux. It fails when a test ran on the default storage environment but not on io_uring.
+- `.github/workflows/windows.yml` runs the suite on Windows, on the default storage environment, when you start it by hand. Windows enforces file share modes and has no directory fsync.
 
 ## Power-loss tests
 
@@ -47,7 +47,10 @@ Each run crashes and reopens three times, so recovery itself is cut too. After e
 | `SOLARIUM_CRASH_ITERATIONS` | More runs. The default is 30 on each environment. |
 | `SOLARIUM_CRASH_SEED` | The first seed. |
 
-A failure names its seed and keeps the directories of the run.
+A failure names its seed and keeps the directories of the run. Some seeds change the options, so the power loss also cuts these cases:
+
+- Seeds 4 to 7 of each eight run four compaction threads, so compactions run side by side.
+- Seeds 8 to 15 of each sixteen pace their SSTables with a `RateLimiter`, and start their writeback every 16 KB with `BytesPerSync`.
 
 ## Kill tests
 
@@ -58,7 +61,36 @@ A failure names its seed and keeps the directories of the run.
 3. The test kills it at a random moment, sometimes while it still opens the database.
 4. The test reopens the directory and checks it against the reports.
 
-A killed process loses nothing that the operating system holds. So every acknowledged batch must be there, synced or not, and the batch in flight must be there whole or not at all. Each run kills three workers in a row in one directory. The suite runs 4 runs on each environment. `SOLARIUM_KILL_ITERATIONS` and `SOLARIUM_KILL_SEED` change that.
+A killed process loses nothing that the operating system holds. So every acknowledged batch must be there, synced or not, and the batch in flight must be there whole or not at all. Each run kills three workers in a row in one directory. As in the power-loss tests, seeds 4 to 7 of each eight run four compaction threads, and seeds 8 to 15 of each sixteen pace their SSTables. The suite runs 4 runs on each environment. `SOLARIUM_KILL_ITERATIONS` and `SOLARIUM_KILL_SEED` change that.
+
+## Concurrent compaction tests
+
+`ConcurrentCompactionTests` runs several compactions at once and checks that they keep out of each other's way:
+
+- A held merge of one column family does not hold back the merge of another.
+- The picker passes over the files and the key ranges that running compactions hold.
+- A merge of level 0 runs beside a merge of the level below, outside its range.
+- A manual compaction waits for the running ones, and holds back new ones.
+- A compaction that fails beside another stops all writes, and the other installs nothing.
+- `Dispose` stops every merge that runs, and leaves no file of theirs.
+- Many writers on several column families agree with a model while four compactions run.
+
+`ModelTests` also checks every read path against a `SortedDictionary` across the levels with four compaction threads.
+
+## Pacing tests
+
+`PacingTests` checks the rate limiter and `BytesPerSync`:
+
+- A limiter hands out its rate one refill period at a time.
+- Flushes go before compactions, and compactions still progress while flushes never stop.
+- An auto-tuned limiter falls when idle and climbs under steady demand, within its range.
+- A limiter refuses a rate or a period that it cannot keep.
+- A flush writes its SSTable 1 MiB at a time, and starts the writeback of each write.
+- A limiter paces flushes and compactions, and the writeback comes with it.
+- One limiter paces two databases.
+- A failed writeback fails the flush, as a failed write does.
+
+The tests that write SSTables run on each storage environment that the machine has: the default one, and io_uring on Linux.
 
 ## Checkpoint tests
 

@@ -4,9 +4,9 @@ sidebar_position: 1
 
 # Column Families
 
-A column family is a named, ordered key space in one database. Each column family has its own memtables, its own SSTables, and its own options. All column families of a database share one WAL and one sequence of sequence numbers. Because of this, one `WriteBatch` can write to several column families atomically.
+Column families let you keep different kinds of data in one database, each in its own sorted key space, and still change them together. A Raft log keeps its entries in one column family and its metadata in another, and one write batch updates both atomically. If you know SQLite, a column family is like a separate table in one database file.
 
-Use this guide to plan your key spaces and to give each one the options that fit its data.
+Each column family has its own memtables, its own SSTables, and its own options. All column families of a database share one WAL and one sequence of sequence numbers. That is what makes a batch across column families atomic.
 
 ## When to use a column family
 
@@ -105,6 +105,6 @@ After a crash, the database holds both puts or neither of them. The shared WAL m
 | The WAL files | The memtables |
 | The sequence numbers | The SSTables and their levels |
 | The write stalls: one column family past a trigger slows the writes to all of them | The options |
-| The flush thread and the compaction thread | The flush point in the manifest |
+| The flush thread and the compaction threads | The flush point in the manifest |
 
 A column family with few writes can keep old WAL files alive, because its memtable still needs them. `DbOptions.MaxTotalWalSize` stops this: when the live WAL files are larger than this size, the column families that keep the oldest WAL file alive are flushed.

@@ -9,7 +9,7 @@ This page takes you from an empty project to a database that holds data in two c
 ## Requirements
 
 - The .NET 10 SDK. The Solarium repository pins it in `global.json`.
-- For the optional io_uring environment: Linux 6.1 or later. See [io_uring on Linux](guides/io-uring.md).
+- For the optional io_uring storage environment: Linux 6.1 or later. See [io_uring on Linux](guides/io-uring.md).
 
 ## Add Solarium to your project
 
@@ -155,11 +155,9 @@ db.Write(new WriteBatch()
 
 Console.WriteLine(Encoding.UTF8.GetString(db.Get("last"u8, metadata)!));
 
-using (Iterator iterator = db.NewIterator(options: new ReadOptions { IterateUpperBound = "log;"u8.ToArray() }))
-{
-    for (iterator.Seek("log:"u8); iterator.Valid(); iterator.Next())
-        Console.WriteLine($"{Encoding.UTF8.GetString(iterator.Key())} = {Encoding.UTF8.GetString(iterator.Value())}");
-}
+using Iterator iterator = db.NewIterator(options: new ReadOptions { IterateUpperBound = "log;"u8.ToArray() });
+for (iterator.Seek("log:"u8); iterator.Valid(); iterator.Next())
+    Console.WriteLine($"{Encoding.UTF8.GetString(iterator.Key())} = {Encoding.UTF8.GetString(iterator.Value())}");
 
 db.DeleteRange("log:0001"u8, "log:0002"u8);
 Console.WriteLine(db.Get("log:0001"u8) is null ? "log:0001 is deleted" : "log:0001 is still there");

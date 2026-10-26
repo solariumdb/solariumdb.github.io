@@ -8,37 +8,30 @@ Solarium is a **log-structured merge-tree** (LSM tree): a store that writes chan
 
 ## The parts
 
+A write goes through the write queue to the WAL and the active memtable. Background threads then flush the memtable and compact the SSTables:
+
 ```mermaid
-flowchart TB
-    subgraph Callers[Your threads]
-        W1[Writer] & W2[Writer] & W3[Writer]
-        R1[Reader]
-    end
-    subgraph Engine[SolariumDb]
-        Q[Write queue and group commit]
-        WAL[(WAL files)]
-        subgraph CF[Each column family]
-            V[Current version]
-            AM[Active memtable]
-            IM[Immutable memtables]
-            L0[Level 0 SSTables]
-            LS[Levels 1 to 6 SSTables]
-        end
-        FT[Flush thread]
-        CT[Compaction thread]
-        MF[(MANIFEST)]
-    end
-    ENV[Storage environment]
-    W1 & W2 & W3 --> Q
-    Q --> WAL
-    Q --> AM
-    R1 -.-> V
-    V -.-> AM & IM & L0 & LS
-    FT -- writes --> L0
-    CT -- merges and moves --> LS
-    FT & CT -- record --> MF
-    WAL & MF & L0 & LS --- ENV
+flowchart LR
+    W[Writer threads] --> Q[Write queue and group commit]
+    Q --> WAL[(WAL files)]
+    Q --> AM[Active memtable]
+    AM -- full --> IM[Immutable memtables]
+    IM -- flush thread --> L0[Level 0 SSTables]
+    L0 -- compaction threads --> LS[Levels 1 to 6]
 ```
+
+A read takes the current version of a column family, and searches its sources from the newest to the oldest:
+
+```mermaid
+flowchart LR
+    R[Reader threads] --> V[Current version]
+    V --> AM[Active memtable]
+    V --> IM[Immutable memtables]
+    V --> L0[Level 0 SSTables]
+    V --> LS[Levels 1 to 6]
+```
+
+The manifest records the live files, and the storage environment does all file I/O.
 
 | Part | Role | Details |
 | --- | --- | --- |
@@ -47,7 +40,7 @@ flowchart TB
 | **Memtable** | A lock-free skip list in memory, one active for each column family. | [Memtable](memtable.md) |
 | **Version** | An immutable list of the memtables and SSTables of a column family. A read uses one version. | [Read Path](read-path.md) |
 | **Flush thread** | Writes immutable memtables to level 0 SSTables. | [Flushes](flushes.md) |
-| **Compaction thread** | Merges and moves SSTables down the seven levels. | [Compaction](compaction.md) |
+| **Compaction threads** | Merge and move SSTables down the seven levels, up to `MaxBackgroundCompactions` at once. | [Compaction](compaction.md) |
 | **SSTable** | An immutable sorted file with data blocks, a Bloom filter, and an index. | [SSTables](sstables.md) |
 | **Manifest** | The list of live WAL files, column families, SSTables, and flush points. | [Data Directory](../reference/data-directory.md) |
 | **Storage environment** | All file I/O: default or io_uring. | [Storage Environments](storage-environments.md) |
@@ -83,8 +76,8 @@ A version never changes after it is published. A memtable switch, a finished flu
 | Your writer threads | One of them leads each write group. Each one inserts its own batch into the memtable. |
 | Your reader threads | Reads take no locks. |
 | `solarium-flush` | One background thread for all flushes. |
-| `solarium-compaction` | One background thread for all compactions, across all column families. |
-| The io_uring reactor | Only with the io_uring environment: one reactor thread for the reads and writes. |
+| `solarium-compaction-0`, `-1`, ... | One thread for each of the `MaxBackgroundCompactions` compactions that can run at once, across all column families. The default is 1. |
+| The io_uring reactor | Only with the io_uring storage environment: one reactor thread for the reads and writes. |
 
 ## Locks
 
@@ -98,9 +91,9 @@ Reads take none of these locks.
 
 ## Where Solarium follows RocksDB, and where it does not
 
-The design follows RocksDB in each part: group commit with pipelined writes, the skip-list memtable, the `SuperVersion`, leveled compaction with dynamic level sizing, fragmented range tombstones, and the property names. The main differences are:
+The design follows RocksDB in each part: group commit with pipelined writes, the skip-list memtable, the `SuperVersion`, leveled compaction with dynamic level sizing, a rate limiter for flush and compaction writes, fragmented range tombstones, and the property names. The main differences are:
 
-- one compaction thread;
+- one thread for each merge (no subcompactions), and one flush thread;
 - no block cache;
 - a WAL record with a durable offset;
 - a manifest that is written again whole on each change.

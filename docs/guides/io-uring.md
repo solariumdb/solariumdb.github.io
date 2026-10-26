@@ -4,13 +4,11 @@ sidebar_position: 7
 
 # io_uring on Linux
 
-All file I/O in Solarium goes through a **storage environment**, as with the `Env` of RocksDB. The default environment works on every platform. The `Solarium.IoUring` package adds an environment for Linux 6.1 or later that does its file I/O through io_uring, on the [ioxide](https://github.com/MDA2AV/ioxide) runtime.
+On Linux 6.1 or later, the `Solarium.IoUring` package lets the engine do its file I/O through io_uring, the asynchronous I/O interface of the Linux kernel, on the [ioxide](https://github.com/MDA2AV/ioxide) runtime. Today it is for measurement and experiments, not for speed. The engine issues one I/O at a time, and on that pattern io_uring is slower than the default storage environment. Use it only when your own measurements show a gain.
 
-:::tip Measure first
-On the measured hardware, io_uring is never faster for one operation at a time, which is how the engine issues them. Unsynced writes were 0.3 to 0.9 times as fast as RocksDB on io_uring, against 1.0 to 1.6 times on the default environment. Use the default environment unless your own measurements show a gain.
-:::
+All file I/O in Solarium goes through a **storage environment**, as with the `Env` of RocksDB. The default storage environment works on every platform. `Solarium.IoUring` adds a second one.
 
-## Use the io_uring environment
+## Use the io_uring storage environment
 
 ```csharp
 using Solarium;
@@ -38,7 +36,7 @@ The constructor takes the size of the ring, `ringEntries`. The default is 256.
 | `DefaultStorageEnvironment` (all platforms) | `RandomAccess` (pread and pwrite) | `RandomAccess.FlushToDisk` |
 | `IoUringStorageEnvironment` (Linux) | `IORING_OP_READ` and `IORING_OP_WRITE` on one ioxide reactor thread | `fdatasync` on the calling thread |
 
-ioxide has no fsync operation in its API. So the io_uring environment flushes with `fdatasync` on the calling thread, not through the ring.
+ioxide has no fsync operation in its API. So the io_uring storage environment flushes with `fdatasync` on the calling thread, not through the ring.
 
 ## What io_uring costs
 

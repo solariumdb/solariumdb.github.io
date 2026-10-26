@@ -4,7 +4,9 @@ sidebar_position: 2
 
 # Writes and Batches
 
-Every write in Solarium is a batch. `Put`, `Delete`, and `DeleteRange` on the database are batches of one operation. This guide explains how to build batches, how to choose between synced and unsynced writes, and what happens when many threads write at the same time.
+A write batch groups several changes into one write that lands whole, or not at all. It is like a database transaction that only writes: a crash in the middle never leaves half of it on disk. Use it whenever two changes must agree, such as a log entry and the index that points to it.
+
+Every write in Solarium is a batch. `Put`, `Delete`, and `DeleteRange` on the database are batches of one operation.
 
 ## Build a batch
 
@@ -37,12 +39,7 @@ db.Write(batch, WriteOptions.Synced);   // Sync = true
 db.Write(batch, WriteOptions.Default);  // Sync = false, the default
 ```
 
-| Write | Survives a process crash | Survives a power loss |
-| --- | --- | --- |
-| Synced | Yes | Yes, when `Write` returns |
-| Unsynced | Yes | No. After a clean `Dispose`, yes |
-
-An unsynced write is in the WAL file in the operating system when `Write` returns. A process crash does not lose it, because the operating system still has it. A power loss can lose it, because the device did not get a flush.
+A synced write survives a power loss when `Write` returns. An unsynced write survives a process crash, but a power loss can lose it, because the device did not get a flush. [Durability](../operations/durability.md) has the full table of what each write survives.
 
 Use a synced write when the caller acts on the write after it returns. For example, a Raft node must not acknowledge a log entry before it is durable. Use an unsynced write when you can rebuild the data, or when a later synced write makes it durable.
 

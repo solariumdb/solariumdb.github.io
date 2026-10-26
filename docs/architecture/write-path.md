@@ -31,7 +31,7 @@ sequenceDiagram
 ```
 
 1. **Encode.** A writer encodes its batch into a WAL record, without the sequence numbers. It notes the column families that the batch writes to. Then it joins the write queue. When no leader is active, it becomes the leader.
-2. **Take the group.** The leader takes the queue as its group, from the front, up to `MaxWriteBatchGroupSizeBytes` of records. The leader's own batch always goes, so a larger batch is a group of its own. When the leader's batch is at most one eighth of the cap, the group stops at the leader's size plus one eighth, as in RocksDB. This keeps a small write from waiting for a large group.
+2. **Take the group.** The leader takes the queue as its group, from the front, up to `MaxWriteBatchGroupSizeBytes` of records. The batch of the leader always goes, so a larger batch is a group of its own. When the batch of the leader is at most one eighth of the cap, the group stops at the size of that batch plus one eighth, as in RocksDB. This keeps a small write from waiting for a large group.
 3. **Switch memtables.** The leader switches every full memtable of the column families that the group writes to.
 4. **Append.** The leader copies the records of the writers into one buffer. It gives each record its first sequence number and its checksum, and writes them to the WAL in one append. If any writer asked for `Sync`, it flushes the WAL once.
 5. **Offer leadership.** The leader offers leadership to the oldest writer in the queue, if there is one. So the WAL append of the next group runs while this group goes into the memtables. This is the `enable_pipelined_write` of RocksDB.

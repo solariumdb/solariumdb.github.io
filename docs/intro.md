@@ -14,7 +14,7 @@ Solarium is a brand-new database, at version 0.1.0. Its on-disk format can still
 
 ## In simple terms
 
-If you have not used a log-structured store before, the core idea is simple:
+If you append each change to a file and call fsync, a write is durable, but a read must scan the whole file. A sorted collection in memory, such as a `SortedDictionary`, reads fast but loses everything in a crash. Solarium combines the two:
 
 1. A write goes first to a **write-ahead log (WAL)**, a file that only grows. After a crash, the WAL tells the database what to replay.
 2. The write then goes into a **memtable**, a sorted structure in memory.
@@ -41,8 +41,8 @@ This design makes writes fast, because a write is one append and one insert in m
 
 | Feature | What it means for you |
 | --- | --- |
-| **Column families** | Named, ordered key spaces in one database. They share one WAL, so one batch can write to several of them atomically. |
-| **Atomic write batches** | A `WriteBatch` applies all its puts, deletes, and range deletes, or none of them. |
+| **Column families** | Named, ordered key spaces in one database, like separate tables in one SQLite file. They share one WAL, so one batch can write to several of them atomically. |
+| **Atomic write batches** | A `WriteBatch` applies all its puts, deletes, and range deletes, or none of them, like a transaction that only writes. |
 | **Synced and unsynced writes** | A synced write survives a power loss when `Write` returns. An unsynced write survives a process crash. |
 | **Range deletes** | `DeleteRange` deletes a key range with one range tombstone, not one delete for each key. |
 | **Ordered iterators** | Seek, step forward, step back, and stop at an upper bound. |
@@ -50,7 +50,7 @@ This design makes writes fast, because a write is one append and one insert in m
 | **Checkpoints** | A consistent copy of the database in a new directory, with hard links to the SSTables. |
 | **Group commit** | Writes from many threads share their WAL appends and flushes. |
 | **Lock-free reads** | Reads take no locks, on a lock-free skip-list memtable. |
-| **Storage environments** | All file I/O goes through an interface. The default works everywhere. An io_uring environment is available for Linux. |
+| **Storage environments** | All file I/O goes through an interface. The default works everywhere. An io_uring storage environment is available for Linux. |
 
 Every member is safe to call from any thread.
 
@@ -99,7 +99,7 @@ db.DeleteRange("log:0000"u8, "log:0001"u8);
 - The embedded API, column families, atomic batches across them, `DeleteRange`, and iterators with an upper bound.
 - Group commit with pipelined writes, and lock-free reads on a skip-list memtable.
 - WAL recovery that cuts a torn tail and refuses damage to flushed data. Power-loss tests and kill tests check it.
-- Memtable flushes to SSTables, LZ4 block compression, WAL rotation with a size cap, the manifest, leveled compaction into the seven levels of RocksDB with its dynamic level sizing, `DeleteFilesInRange`, checkpoints, and write stalls.
+- Memtable flushes to SSTables, LZ4 block compression, WAL rotation with a size cap, the manifest, leveled compaction into the seven levels of RocksDB with its dynamic level sizing, up to `MaxBackgroundCompactions` compactions at once, a rate limiter and `BytesPerSync` for flushes and compactions, `DeleteFilesInRange`, checkpoints, and write stalls.
 - The RocksDB properties and the live-file metadata that Kommander reads.
 - `Solarium.Kommander`. It passes the conformance suite of Kommander for WAL backends and the behavior tests of its RocksDB backend. It runs three-node Kommander clusters in the tests and publishes the engine `raft.wal.*` metrics.
 - `Solarium.Kahuna`, a port of the RocksDB persistence backend of Kahuna that passes its behavior tests.
@@ -108,7 +108,7 @@ db.DeleteRange("log:0000"u8, "log:0001"u8);
 
 - **Recovery from an engine failure without a reopen.** After a WAL, flush, or compaction failure, the database refuses all writes until you open it again. `SolariumWAL` reopens it automatically.
 - **A shared block cache and memtable budget.** Solarium has no block cache. The page cache of the operating system is the only cache.
-- **More than one compaction at a time**, as with `max_background_compactions` in RocksDB.
+- **Subcompactions and more than one flush thread.** One merge always runs on one thread, as with `max_subcompactions` of 1 in RocksDB. Flushes have one thread.
 
 ## Where to go next
 

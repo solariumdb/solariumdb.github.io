@@ -8,6 +8,15 @@ sidebar_position: 1
 
 It targets Kommander 1.11.3 and .NET 10. This is version 0.1.0, so the on-disk format can still change.
 
+```mermaid
+flowchart LR
+    RM[RaftManager] --> I[IWAL]
+    I -. today .-> R[RocksDbWAL and the native RocksDB library]
+    I --> S[SolariumWAL]
+    S --> DB[SolariumDb]
+    DB --> ENV[Default or io_uring storage environment]
+```
+
 ## Use it
 
 Add a project reference to `src/Solarium.Kommander/Solarium.Kommander.csproj` (see [Getting Started](../getting-started.md#add-solarium-to-your-project)). Then create the WAL and pass it to `RaftManager`:
@@ -47,7 +56,7 @@ using IoUringStorageEnvironment environment = new();
 using SolariumWAL wal = new(path, "v1", logger, syncWrites: true, new SolariumWalOptions { Environment = environment });
 ```
 
-io_uring matches the default environment on synced writes, because their fsync does not go through the ring. It is slower on unsynced writes, because each write is a hand-off to the reactor thread. See [io_uring on Linux](../guides/io-uring.md).
+io_uring matches the default storage environment on synced writes, because their fsync does not go through the ring. It is slower on unsynced writes, because each write is a hand-off to the reactor thread. See [io_uring on Linux](../guides/io-uring.md).
 
 ## Durability
 
@@ -83,8 +92,9 @@ The rows and keys are the same bytes, but the files are those of Solarium. A `Ro
 | `ShardLevel0FileNumCompactionTrigger` | 8 | The level 0 files of a shard that start a compaction. |
 | `ShardLevel0SlowdownWritesTrigger` | 28 | The level 0 files of a shard that slow writes. |
 | `ShardLevel0StopWritesTrigger` | 44 | The level 0 files of a shard that stop writes. |
+| `MaxBackgroundCompactions` | the compactions of `clamp(CPUs / 2, 2, 8)` background jobs: 6 on 16 CPUs | The compactions that run at once. This matches the `max_background_jobs` of `RocksDbWAL`, which RocksDB splits into a quarter for flushes and the rest for compactions. |
 | `MaxTotalWalSizeFlushUnits` | 2 | The WAL size cap, in flush units. Past it, the column families that keep the oldest WAL file are flushed, so a shard with few writes does not keep every WAL file. 0 keeps the default of Solarium. |
-| `Environment` | the default environment | Where the files go. |
+| `Environment` | the default storage environment | Where the files go. |
 | `TickSource` | the system clock | The clock of the failure log cadence and of the probe interval. |
 
 A partition that owns its shard writes files that do not overlap. So they move down the levels with no rewrite.
@@ -157,4 +167,4 @@ Each open `SolariumWAL` reports one measurement for each gauge, without tags, as
 - `ClusterTests`, which runs Kommander clusters of three nodes in one process, each node on its own `SolariumWAL`;
 - `MetricsTests`, which reads the instruments through a `MeterListener`.
 
-Each test runs on the default and the io_uring environment. [Testing](../operations/testing.md) describes the crash tests, and [Benchmarks](../operations/benchmarks.md#the-kommander-wal-against-rocksdb) compares the write path with `RocksDbWAL`.
+Each test runs on the default and the io_uring storage environment. [Testing](../operations/testing.md) describes the crash tests, and [Benchmarks](../operations/benchmarks.md#the-kommander-wal-against-rocksdb) compares the write path with `RocksDbWAL`.

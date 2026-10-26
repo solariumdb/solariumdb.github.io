@@ -22,6 +22,9 @@ The options of the whole database, for `SolariumDb.Open`.
 | `MaxTotalWalSize` | `0` | When the live WAL files are larger than this, flush the column families that keep the oldest one alive. 0: 4 times the sum of `WriteBufferSize × MaxWriteBufferNumber` over all column families. | `max_total_wal_size` |
 | `DelayedWriteRate` | 16 MiB/s | The rate, in bytes per second, that writes slow down to at the slowdown trigger. Must be positive. | `delayed_write_rate` |
 | `MaxWriteBatchGroupSizeBytes` | 1 MiB | The most bytes of WAL records that one write group takes. Must be positive. | `max_write_batch_group_size_bytes` |
+| `MaxBackgroundCompactions` | 1 | The most compactions that run at once, across every column family, each on its own thread. Flushes have one thread of their own. Must be positive. | `max_background_compactions` |
+| `RateLimiter` | `null` | Paces the bytes that flushes and compactions write. Flushes go first. The WAL, the manifest, and checkpoints are not paced. One limiter can pace several databases. See [RateLimiter](#ratelimiter). | `rate_limiter`, writes only (`kWritesOnly`) |
+| `BytesPerSync` | 0, or 1 MiB with a `RateLimiter` | After this many bytes of an SSTable, a flush or a compaction starts the writeback of what it wrote (`sync_file_range` on Linux, nothing elsewhere). It makes nothing durable. 0: never. Must not be negative. | `bytes_per_sync`, for SSTables |
 
 ## ColumnFamilyOptions
 
@@ -53,6 +56,28 @@ RocksDB corrects some values with a warning in its log. Solarium has no log, so 
 | A stop trigger below the slowdown trigger | Throws | Raises it to the slowdown trigger |
 | `DelayedWriteRate` below 1 | Throws | Takes 0 as 16 MiB/s |
 | `MaxWriteBufferNumber` below 2 | Throws | Raises it to 2 |
+
+`MaxWriteBatchGroupSizeBytes` or `MaxBackgroundCompactions` below 1, or a negative `BytesPerSync`, also throws.
+
+## RateLimiter
+
+A class in the namespace `Solarium`, as the `GenericRateLimiter` of RocksDB. It paces writes only. See [Differences from RocksDB](rocksdb-differences.md#rate-limiter). You create it and pass it to `DbOptions.RateLimiter`. [Pace background writes](../guides/flushes-and-compaction.md#pace-background-writes) explains when to use it.
+
+```csharp
+RateLimiter limiter = new(bytesPerSecond: 50L * 1024 * 1024);
+```
+
+| Member | Description | RocksDB equivalent |
+| --- | --- | --- |
+| `RateLimiter(long bytesPerSecond, TimeSpan? refillPeriod = null, bool autoTuned = false, int fairness = 10)` | A limiter of `bytesPerSecond`, refilled every `refillPeriod` (100 ms by default). Every `fairness`th refill serves the compactions first. A value below 1, or a period under 1 ms, throws `ArgumentOutOfRangeException`. | `NewGenericRateLimiter` |
+| `long BytesPerSecond` | The rate now: the rate given, or where auto-tuning moved it. | |
+| `void SetBytesPerSecond(long bytesPerSecond)` | Changes the rate from the next refill. For an auto-tuned limiter, it sets the top of its range. | `SetBytesPerSecond` |
+| `TimeSpan RefillPeriod` | How often the budget refills. | |
+| `bool AutoTuned` | True when the rate tunes itself. An auto-tuned limiter starts at half its rate and moves between a twentieth of it and all of it. | `auto_tuned` |
+| `long SingleBurstBytes` | The budget of one refill period. A larger write asks for its bytes in pieces of this size. | `GetSingleBurstBytes` |
+| `long TotalBytesThrough` | The bytes asked for so far. | `GetTotalBytesThrough` |
+| `long TotalRequests` | The pieces asked for so far. | `GetTotalRequests` |
+| `TimeSpan TotalWait` | The time that writes waited for their bytes so far, summed over the waiting writes. | |
 
 ## WriteOptions
 

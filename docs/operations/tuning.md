@@ -4,7 +4,7 @@ sidebar_position: 2
 
 # Tuning
 
-The defaults of Solarium are the defaults of RocksDB, and they suit a general workload. This page explains which options to change for a given workload, and what each change costs. [Options](../reference/options.md) lists every option.
+The defaults of Solarium are the defaults of RocksDB, and they suit a general workload. This page explains which options to change for a given workload, and what each change costs. [Flushes and Compaction](../guides/flushes-and-compaction.md) explains the memtables, level 0, and the base level that these options control. [Options](../reference/options.md) lists every option.
 
 ## Memory
 
@@ -30,6 +30,11 @@ Solarium has no block cache. The page cache of the operating system caches the S
 | Higher slowdown and stop triggers | Fewer write stalls in a burst. | More level 0 files, and slower reads during the burst. |
 | `Compression = Lz4` | Fewer bytes to write. In the Kahuna benchmark, loads were 1.3 to 1.7 times as fast. | CPU to compress, and to decompress on each read of a block. |
 | Many writer threads | Group commit shares the WAL appends and flushes. | None. More writers usually means more throughput. |
+| Higher `MaxBackgroundCompactions` | Level 0 stays lower, and writes stall less. | More bytes written. On a large store, slower synced writes, unless a `RateLimiter` paces the compactions. |
+| A `RateLimiter` | Synced writes keep their share of the drive while flushes and compactions run. | The merges take longer after a burst. Too low a rate lets level 0 grow until writes stall. |
+| `BytesPerSync` | Each SSTable reaches the drive while it is written, not all at its last sync. | Little. In the benchmark, it made synced writes 1% to 5% faster. |
+
+[Pace background writes](../guides/flushes-and-compaction.md#pace-background-writes) explains how to choose a rate for your drive.
 
 The Kommander WAL uses this tuning for its shard column families: 128 MiB memtables, 3 memtables, and level 0 triggers of 8, 28, and 44.
 

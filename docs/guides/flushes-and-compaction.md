@@ -50,7 +50,7 @@ The levels are sized dynamically, as with `level_compaction_dynamic_level_bytes`
 
 So a column family smaller than 256 MB keeps all its sorted data in level 6, and level 0 compacts directly into it.
 
-One background thread runs one compaction at a time, across all column families. It chooses the level with the highest score of at least 1:
+Up to `MaxBackgroundCompactions` compactions run at once, across all column families, each on its own thread. The default is 1. Each compaction thread takes the level with the highest score of at least 1:
 
 - The score of level 0 is its file count divided by `Level0FileNumCompactionTrigger` (4).
 - The score of each sorted level above level 6 is its size divided by its target.
@@ -59,13 +59,59 @@ One background thread runs one compaction at a time, across all column families.
 
 A file that overlaps nothing in the level below moves down as it is, with one manifest save and no rewrite. This is how an append-only key space, such as a Raft log, reaches level 6 with no compaction writes.
 
+## Run several compactions at once
+
+When writes stall because level 0 grows faster than one compaction can empty it, let more compactions run at the same time:
+
+```csharp
+using SolariumDb db = SolariumDb.Open("./data", new DbOptions { MaxBackgroundCompactions = 4 });
+```
+
+Two compactions never read the same file, never compact level 0 of one column family at the same time, and never write overlapping files into one level. So, for each key, the versions in a level stay newer than those in the levels below, as with one thread.
+
+More threads have a cost. In the compaction benchmark with random keys, 6 threads kept level 0 at 22 files against 32, and writes never stalled. But compaction wrote 5.06 times the bytes of the data, against 4.28 with one thread. The threads also write at the same time, and they take the drive from synced writes. On a store of gigabytes, synced batches slowed to about a third. A [rate limiter](#pace-background-writes) gives the drive back. See [Benchmarks](../operations/benchmarks.md#concurrent-compactions).
+
+`SolariumWAL`, the Kommander WAL, runs 6 compactions on 16 CPUs by default. `Solarium.Kahuna` keeps one, so that its synced writes stay fast.
+
+## Pace background writes
+
+A synced write waits until the drive has its WAL records. Flushes and compactions write large SSTables to the same drive. On a drive with little bandwidth for synced writes, a burst of table writes makes each synced write wait longer. A **rate limiter** caps the bytes per second that flushes and compactions write, so synced writes keep their share of the drive:
+
+```csharp
+RateLimiter limiter = new(50L * 1024 * 1024);  // 50 MiB/s for all flushes and compactions
+
+using SolariumDb db = SolariumDb.Open("./data", new DbOptions
+{
+    MaxBackgroundCompactions = 8,
+    RateLimiter = limiter,
+});
+```
+
+How it works:
+
+- A flush or a compaction writes its SSTable through a 1 MiB buffer. Before each write of the buffer, it asks the limiter for those bytes. When the budget is spent, it waits.
+- The budget refills every 100 ms with the rate times the period. Flushes go before compactions. Every tenth refill serves the compactions first, so they always progress.
+- With a limiter, `BytesPerSync` is 1 MiB by default. After each 1 MiB, the writer starts the writeback of what it wrote (`sync_file_range` on Linux) and does not wait for it. So the table reaches the drive while it is written, not all at its last sync. `BytesPerSync` makes nothing durable. You can also set it without a limiter.
+- The WAL, the manifest, checkpoints, and the flushes of the WAL replay at open are not paced.
+- One limiter can pace several databases on one drive. Pass the same instance to each `DbOptions`. `SetBytesPerSecond` changes the rate while the databases run.
+
+In the synced benchmark with 8 compaction threads, a limiter of 25 or 50 MiB/s brought synced batches back to the rate of one thread. On the large Kahuna store, 8 threads at 50 MiB/s loaded 1.2 times as fast as one thread. Synced batches of 64 rows ran 2.5 times as fast. See [Paced background writes](../operations/benchmarks.md#paced-background-writes).
+
+The costs:
+
+- **The work moves to after the burst.** At 50 MiB/s, the merges that the load left behind took 70 to 82 seconds after it, against 6 seconds with one thread and no limiter.
+- **The rate depends on the drive.** On the benchmark drive, 25 to 50 MiB/s is a third to a half of what the drive commits in synced writes. A faster drive needs a higher rate. Too low a rate lets level 0 grow until writes stall.
+- **Auto-tuning does not protect synced writes.** `new RateLimiter(rate, autoTuned: true)` starts at half its rate and moves between a twentieth of it and all of it. When no write waits, it drops to the bottom, and it climbs back by 5% every 10 seconds. In the benchmark, it fell to about 3 MiB/s, level 0 passed the slowdown trigger, and synced writes waited for the stall. Use auto-tuning only with a high rate, to smooth bursts.
+
+`Solarium.Kahuna` sets no limiter, because the rate depends on the drive, and the configuration of Kahuna has no setting for it.
+
 ## Manual compaction
 
 ```csharp
 db.CompactRange(null, null, family);  // the whole column family
 ```
 
-`CompactRange` compacts a key range down to the bottom level. It does not flush the memtable first. See [Range Deletes](range-deletes.md#compactrange).
+`CompactRange` compacts a key range down to the bottom level. It does not flush the memtable first. It runs alone: while it runs, no automatic compaction starts. See [Range Deletes](range-deletes.md#compactrange).
 
 ## Turn off automatic compaction
 
@@ -95,10 +141,13 @@ Old SSTables keep their own compression, so you can change the option between op
 | `rocksdb.base-level` | The level that level 0 compacts into. |
 | `rocksdb.compaction-pending` | 1 when a level needs a compaction. |
 | `rocksdb.mem-table-flush-pending` | 1 when a memtable waits for a flush that has not started. |
-| `rocksdb.num-running-flushes`, `rocksdb.num-running-compactions` | 0 or 1. There is one thread of each. |
+| `rocksdb.num-running-flushes` | 0 or 1. There is one flush thread. |
+| `rocksdb.num-running-compactions` | From 0 to `MaxBackgroundCompactions`. |
+
+A `RateLimiter` also counts what it paced: `TotalBytesThrough`, `TotalRequests`, and `TotalWait`, the time that writes waited for their bytes.
 
 [Diagnostics](../operations/diagnostics.md) explains how to read them.
 
 ## Failures
 
-A flush or compaction failure stops all later writes until you open the database again. Reads continue. A crash during a compaction leaves orphan files, and the next open deletes them.
+A flush or compaction failure stops all later writes until you open the database again. A failed writeback of `BytesPerSync` fails the flush or the compaction, as a failed write does. Reads continue. A crash during a compaction leaves orphan files, and the next open deletes them.

@@ -107,6 +107,7 @@ The seek methods throw `ObjectDisposedException` after `Dispose`.
 | `DbOptions` | The options of the database. See [Options](options.md). |
 | `ColumnFamilyOptions` | The options of one column family. See [Options](options.md). |
 | `CompressionType` | `None` (0) or `Lz4` (1). |
+| `RateLimiter` | Paces flush and compaction writes, for `DbOptions.RateLimiter`. See [Options](options.md#ratelimiter). |
 
 ## LiveFileMetaData
 
@@ -140,6 +141,6 @@ The namespace is `Solarium.Storage`.
 | Type | Description |
 | --- | --- |
 | `IStorageEnvironment` | Where the file I/O of the engine goes. See [Storage Environments](../architecture/storage-environments.md). |
-| `IStorageFile` | One open file: positional reads and writes, flush, length. |
-| `DefaultStorageEnvironment` | The default environment, on `RandomAccess`. `DefaultStorageEnvironment.Instance` is the shared instance. |
-| `Solarium.IoUring.IoUringStorageEnvironment` | The io_uring environment for Linux, in the `Solarium.IoUring` package. See [io_uring on Linux](../guides/io-uring.md). |
+| `IStorageFile` | One open file: positional reads and writes, flush, the start of a writeback (`SyncRange`), length. |
+| `DefaultStorageEnvironment` | The default storage environment, on `RandomAccess`. `DefaultStorageEnvironment.Instance` is the shared instance. |
+| `Solarium.IoUring.IoUringStorageEnvironment` | The io_uring storage environment for Linux, in the `Solarium.IoUring` package. See [io_uring on Linux](../guides/io-uring.md). |

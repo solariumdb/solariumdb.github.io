@@ -31,20 +31,19 @@ Solarium tells these two cases apart. Each WAL record carries the **durable offs
 
 ## What recovery does at open
 
-1. Every WAL file replays in order. Entries that an SSTable already holds are skipped.
-2. A memtable that fills during the replay is written as a level 0 SSTable at once. So the WAL files do not need to fit in memory.
-3. The newest WAL file is cut at its first damage, with everything after it, unless an intact record after the damage has a durable offset past it.
-4. If that record exists, it proves that the damaged bytes were flushed. No crash explains that damage, so the open fails and does not drop data.
-5. A new WAL file starts.
+At open, the WAL files replay in order, and the entries that an SSTable already holds are skipped. Then recovery decides what to do with any damage that it finds:
 
-The open also fails, and changes nothing, when it finds:
+```mermaid
+flowchart TD
+    A[Replay the WAL files in order] --> B{Damage found?}
+    B -- No --> OK[Open with every record]
+    B -- In an older WAL file, a gap in the sequence numbers, or a missing WAL file --> F1[Open fails and changes nothing]
+    B -- In the newest WAL file --> C{An intact record after the damage proves that the damaged bytes were flushed?}
+    C -- No: a crash explains it --> CUT[Cut the file at the damage and open]
+    C -- Yes: no crash explains it --> F2[Open fails and drops no data]
+```
 
-- damage in an older WAL file;
-- a gap in the sequence numbers;
-- a WAL file that the manifest lists but that does not exist;
-- a directory with data files but no `MANIFEST`.
-
-A crash during a flush or a compaction leaves orphan files. The next open deletes them.
+The open also fails, and changes nothing, for a directory with data files but no `MANIFEST`. A crash during a flush or a compaction leaves orphan files, and the next open deletes them. [WAL and Recovery](../architecture/wal-and-recovery.md#recovery-rules) gives the exact rules.
 
 ## The one case that can drop a synced write
 

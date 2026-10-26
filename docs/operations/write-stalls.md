@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # Write Stalls
 
-When flushes add level 0 files faster than compaction removes them, writes slow down and then stop, as in RocksDB. A **write stall** protects reads: without it, level 0 would grow without limit, and each read would search more files.
+When flushes add [level 0](../guides/flushes-and-compaction.md#compaction) files faster than compaction removes them, writes slow down and then stop, as in RocksDB. A **write stall** protects reads: without it, level 0 would grow without limit, and each read would search more files.
 
 ## The triggers
 
@@ -49,18 +49,18 @@ A column family with `DisableAutoCompactions` stalls nothing, as in RocksDB, bec
 
 ## What to do about stalls
 
-A stall means that one compaction thread cannot keep up with your writes. You can:
+A stall means that compaction cannot keep up with your writes. You can:
 
 - write fewer, larger level 0 files: raise `WriteBufferSize`;
 - let compaction take more level 0 files at once: raise `Level0FileNumCompactionTrigger`;
 - write fewer bytes: set `Compression = CompressionType.Lz4`;
-- give a burst more room: raise the slowdown and stop triggers.
+- give a burst more room: raise the slowdown and stop triggers;
+- run more compactions at once: raise `DbOptions.MaxBackgroundCompactions`.
 
-Solarium runs one compaction at a time, where RocksDB can run several. A workload that needs several compactions at a time is not a good fit yet.
+More compaction threads keep level 0 lower, but they write more bytes. On a large store, they can also slow synced writes. See [Run several compactions at once](../guides/flushes-and-compaction.md#run-several-compactions-at-once).
+
+A `RateLimiter` also slows compaction. Too low a rate lets level 0 grow until writes slow down and stop. When stalls start after you set a limiter, raise its rate.
 
 ## Differences from RocksDB
 
-- The delayed write rate is fixed. RocksDB lowers it as the compaction backlog grows, and raises it as the backlog gets smaller.
-- There is no stall on pending compaction bytes (`soft_pending_compaction_bytes_limit` in RocksDB). Only the level 0 file count slows and stops writes.
-- There is no `WriteOptions.no_slowdown`, which fails a write instead of delaying it.
-- `Flush` does not wait for a stall to clear first.
+Write stalls differ from RocksDB in four ways: the delayed write rate is fixed, only the level 0 file count stalls writes, there is no `WriteOptions.no_slowdown`, and `Flush` does not wait for a stall to clear. See [Differences from RocksDB](../reference/rocksdb-differences.md#write-stalls).

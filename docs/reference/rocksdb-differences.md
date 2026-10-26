@@ -11,12 +11,12 @@ RocksDB is the reference behavior. A deliberate difference is on this page, and 
 Solarium covers the part of RocksDB that the Raft log of Kommander and the backend of Kahuna use. These features of RocksDB are not in Solarium:
 
 - a block cache, and a shared memory budget across databases;
-- more than one compaction at a time (`max_background_compactions`, `max_background_jobs`);
+- subcompactions (`max_subcompactions`), and more than one flush thread (`max_background_flushes`, `max_background_jobs`);
 - codecs other than LZ4;
 - static level targets (`level_compaction_dynamic_level_bytes` off);
 - a stall on pending compaction bytes, and `WriteOptions.no_slowdown`;
 - creating or dropping a column family on an open database;
-- a rate limiter;
+- rate limits on reads or on the WAL (`kReadsOnly`, `kAllIo`, `rate_limiter_priority`, and `wal_bytes_per_sync`);
 - automatic recovery from a background error without a reopen.
 
 ## Files and formats
@@ -37,7 +37,8 @@ Solarium covers the part of RocksDB that the Raft log of Kommander and the backe
 
 - **Levels are always sized dynamically**, as with the default `level_compaction_dynamic_level_bytes` of RocksDB. There is no option for static targets. A column family that got smaller keeps its base level at the first level with files, as in RocksDB, but its levels above the size that it needs are not drained. RocksDB compacts such a level down on its own.
 - **The score of level 0 is its file count only.** RocksDB, with dynamic level sizing, also scores level 0 by its bytes against the target of the base level, so a few large level 0 files compact sooner. Scores do not discount the bytes that compactions are about to bring into a level, as those of RocksDB do.
-- **One compaction runs at a time**, across every column family. RocksDB runs up to `max_background_compactions` (the backend of Kahuna sets 8), on files that no running compaction reads. In the shared-family compaction scenario, the one thread of Solarium kept the level 0 of every column family at 13 files or fewer, under the slowdown trigger of 28. Its merges wrote 1.04 to 1.07 times the flushed bytes, against 0.86 to 0.87 for RocksDB with 8 background jobs.
+- **A merge runs on one thread.** There are no subcompactions (`max_subcompactions`, whose default is 1), which split a large merge into key ranges on several threads.
+- **Background threads.** Compactions run on up to `MaxBackgroundCompactions` threads, and flushes on one. There is no `max_background_jobs` to split between them, and no `max_background_flushes`. A manual compaction always runs alone, as with `exclusive_manual_compaction`, the default of RocksDB.
 - **File selection.** A level 0 merge picks the oldest file first, as in RocksDB. A merge of a sorted level takes one file chosen by `kMinOverlappingRatio`, with no expansion to more files of the level, and without the checks of RocksDB on the overlap two levels down (`max_compaction_bytes`, the grandparent overlap).
 - **Trivial moves.** A move from level 0 can take several files at once. RocksDB moves several level 0 files only into a level that has files, and one file into any level.
 - **Range tombstone bounds.** A range tombstone is cut at the boundaries between the output files of a merge, with a user key as the excluded bound, which the table records. RocksDB bounds files with internal keys and a sentinel.
@@ -50,6 +51,13 @@ Solarium covers the part of RocksDB that the Raft log of Kommander and the backe
 - **There is no stall on pending compaction bytes** (`soft_pending_compaction_bytes_limit`, 64 GB). Only the level 0 file count slows and stops writes.
 - **There is no `WriteOptions.no_slowdown`**, which fails a write instead of delaying it.
 - **`Flush` does not wait for a stall to clear first.** The `Flush` of RocksDB (with `FlushOptions.allow_write_stall` false, the default) waits while one more level 0 file or memtable would delay or stop writes.
+
+## Rate limiter
+
+- **Writes only.** The `RateLimiter` paces flush and compaction writes, as the default mode of RocksDB, `kWritesOnly`. There is no `kReadsOnly` or `kAllIo`, and no `rate_limiter_priority` on reads or on `WriteOptions`.
+- **The replay is not paced.** The flushes of the WAL replay inside `Open` do not go through the limiter. The recovery flushes of RocksDB do.
+- **Fairness is fixed.** Every tenth refill serves the compactions first. RocksDB draws this at random, with a chance of one in ten.
+- **No `wal_bytes_per_sync`.** `BytesPerSync` applies to SSTables only. The WAL syncs whole write groups.
 
 ## Option validation
 

@@ -95,7 +95,7 @@ const fitCards = [
     items: [
       'A database server with a network protocol',
       'Workloads that need a shared block cache or memory budget',
-      'Write-heavy stores that need several compactions at a time',
+      'Fast synced writes beside heavy compactions, without a rate limit tuned to your drive',
       'Production use without your own testing: Solarium is a young database',
     ],
   },
@@ -378,7 +378,7 @@ export default function Home() {
           <div className="container">
             <SectionHeading
               eyebrow="How it is tested"
-              title="Tested against power loss, not only crashes"
+              title="Tested against power loss and crashes"
               subtitle="A storage engine is only as good as its recovery. The tests cut the power and kill processes at random points, and then check every acknowledged write."
             />
             <div className={styles.testingGrid}>
@@ -425,7 +425,7 @@ export default function Home() {
           <div className="container">
             <SectionHeading
               eyebrow="Inside the engine"
-              title="Every part of the engine, explained"
+              title="Every part of the engine explained"
               subtitle="The architecture pages describe each part of Solarium in the order that a write and a read go through it."
             />
             <div className={styles.calloutRow}>

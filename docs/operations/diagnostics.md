@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Diagnostics
 
-Solarium reports its state through the property names of RocksDB and through the live-file metadata. Kommander reads both. This page shows how to read them and what each one tells you. [Properties](../reference/properties.md) lists each property.
+When writes slow down or memory grows, you need to see what the engine is doing. Solarium reports the files in each level, the memtable sizes, the pending flushes and compactions, and the write stalls. It uses the property names of RocksDB, so code that reads RocksDB properties, such as Kommander, reads Solarium too. [Properties](../reference/properties.md) lists each property.
 
 ## Read a property
 

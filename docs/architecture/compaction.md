@@ -4,7 +4,7 @@ sidebar_position: 6
 
 # Compaction
 
-A **compaction** merges SSTables into a lower level. It removes old versions and deleted keys, and keeps the number of files that a read searches low. Solarium compacts into the seven levels of RocksDB, with its dynamic level sizing. One background thread, `solarium-compaction`, runs one compaction at a time across all column families.
+A **compaction** merges SSTables into a lower level. It removes old versions and deleted keys, and keeps the number of files that a read searches low. Solarium compacts into the seven levels of RocksDB, with its dynamic level sizing. Up to `MaxBackgroundCompactions` compactions run at once, across all column families, each on its own thread (`solarium-compaction-0`, `solarium-compaction-1`, and so on). The default is 1.
 
 ## The levels
 
@@ -37,7 +37,7 @@ Each level of each column family has a **score**, as in RocksDB:
 - Level 0: its file count divided by `Level0FileNumCompactionTrigger`.
 - Each level from the base level to level 5: its bytes divided by its target.
 
-The level with the highest score of at least 1, across all column families, goes first.
+The level with the highest score of at least 1, across all column families, goes first. The scores leave out the files that running compactions read.
 
 ## The kinds of compaction
 
@@ -107,18 +107,52 @@ Kommander removes the dead prefix of a Raft log this way, with no rewrite. The f
 1. The level 0 files in the range go into the base level.
 2. Each level from the base level to level 5 goes into the level below, in the range.
 
-It runs on the calling thread, and returns when the last compaction is installed. So a delete in the range reaches the bottom and drops what it hides. As in RocksDB with no compaction filter, level 6 files alone are not rewritten. A compaction that runs finishes first.
+It runs on the calling thread, and returns when the last compaction is installed. So a delete in the range reaches the bottom and drops what it hides. As in RocksDB with no compaction filter, level 6 files alone are not rewritten.
+
+A manual compaction runs alone, as with `exclusive_manual_compaction`, the default of RocksDB. While it waits, no automatic compaction starts. Each of its steps waits until no other compaction runs.
+
+## Several compactions at once
+
+With `MaxBackgroundCompactions` above 1, compactions run side by side. They keep out of each other's way, as the compaction picker of RocksDB does:
+
+- A file that a running compaction reads is not picked again, as with `being_compacted` in RocksDB.
+- A column family has one level 0 compaction at a time, because level 0 files overlap.
+- A merge of level 0 waits while a file of the base level in its range is in a running compaction.
+- A compaction into a level waits while a running compaction into that level writes an overlapping range, as with `RangeOverlapWithCompaction` in RocksDB. So their outputs never overlap.
+
+So, for each key, the versions in a level stay newer than those below. A merge into a level holds every file of that level in its range, and no other compaction can move a version of those keys past it.
+
+Each compaction installs on its own, in one manifest save under the state lock, into the version that the installs of the others left.
+
+The trade-off, measured in the benchmarks with random keys:
+
+| | 1 thread | 6 threads | RocksDB |
+| --- | ---: | ---: | ---: |
+| Write amplification | 4.28 | 5.06 | 4.62 |
+| Most level 0 files | 32 | 22 | 17 |
+| Time that writes stalled | 3.5 s | 0 s | 131.8 s |
+
+With one thread, the score of level 0 always wins, so each merge of level 0 takes many files at once. With more threads, the sorted levels compact as soon as they pass their targets, and each such merge rewrites about ten times its size from level 6, as in RocksDB.
+
+The threads also write at the same time, just after the flushes, when synced writes need the drive. The order of the compactions does not change that: the scores of RocksDB for dynamic level sizing, tried in Solarium, gave the same synced rates. [Paced writes](#paced-writes) is the remedy.
+
+## Paced writes
+
+A flush or a compaction writes its SSTable through a 1 MiB buffer, as the `WritableFileWriter` of RocksDB with its default `writable_file_max_buffer_size`. So it makes one write for each megabyte, not two for each block.
+
+With a `RateLimiter`, the writer asks the limiter for the bytes of each write first, as with the `GenericRateLimiter` of RocksDB:
+
+1. Each refill period (100 ms by default) hands out the rate times the period.
+2. A flush asks at high priority, and a compaction at low priority. So the flushes are served first. On every tenth refill, the compactions are served first.
+3. A write that finds the budget spent waits for the next refill.
+4. A write larger than the budget of one period asks for its bytes in pieces.
+
+An auto-tuned limiter starts at half its rate. Every 100 periods, it moves up by 5% when writes waited in more than 90% of the periods, and down by 5% when they waited in fewer than half. When no write waited, it drops to a twentieth of its rate.
+
+After every `BytesPerSync` bytes of a table (1 MiB once a `RateLimiter` is set), the writer calls `IStorageFile.SyncRange`. The table then reaches the drive while it is written, not all at its last sync, where it would hold up the WAL syncs of the same moment. A failed range sync fails the write of the table, as the `RangeSync` of RocksDB does.
+
+The WAL, the manifest, checkpoints, and the flushes of the WAL replay inside `Open` are not paced. The replay has no write to share the drive with.
 
 ## Dispose and failures
 
-`Dispose` stops a merge that runs and deletes what it wrote. A compaction failure, like a flush failure, stops all later writes until the database opens again.
-
-## One compaction at a time
-
-RocksDB runs up to `max_background_compactions` compactions at a time, on files that no running compaction reads. Solarium runs one. Its effects in the benchmarks:
-
-- The Raft log layout wrote zero bytes in compactions. One thread is enough for it.
-- With random keys, Solarium wrote fewer bytes than RocksDB (write amplification 4.18 against 4.62), but its level 0 grew to 33 files against 17.
-- Under heavy write loads, the work moves later: a full base level sets off merges during the next writes.
-
-More than one compaction at a time is not done yet.
+`Dispose` stops every merge that runs, and deletes what each one wrote. A compaction failure, like a flush failure, stops all later writes until the database opens again. After a compaction fails, no other compaction installs, and a merge that ends later deletes its outputs.

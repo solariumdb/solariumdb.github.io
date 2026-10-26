@@ -4,7 +4,9 @@ sidebar_position: 4
 
 # Range Deletes
 
-Solarium has three ways to remove a range of keys. They differ in cost and in what they guarantee. This guide explains each one, and shows how Kommander combines them to remove the dead prefix of a Raft log.
+A range delete removes every key in a range with one write. A Raft log uses it to drop the dead prefix of the log: millions of old entries go away without one delete for each entry.
+
+Solarium has three ways to remove a range of keys. They differ in cost and in what they guarantee. Kommander combines all three.
 
 | Method | What it writes | When the space comes back | Guarantee |
 | --- | --- | --- | --- |
@@ -30,12 +32,7 @@ db.Write(new WriteBatch()
 - An end key before the begin key throws `ArgumentException` when you add it to the batch.
 - A put of a key in the range after the range delete is visible again, because it is newer than the tombstone.
 
-The cost of a range delete is small, but it is not zero. Each read of a key checks the tombstones that can cover it. Solarium keeps that check fast:
-
-- An SSTable cuts its tombstones into fragments that do not overlap, when it opens. A read does a binary search for its fragment.
-- The memtable indexes its tombstones in runs of 8, 16, 32, and more, as the range deletes come. A read never builds an index.
-
-With 8,192 tombstones in the memtable, a `Get` takes 0.23 µs, against 0.20 µs with none. [Memtable](../architecture/memtable.md) explains the runs.
+Range tombstones cost reads very little. Each read checks the tombstones that can cover its key, and Solarium indexes them so that the check stays fast with thousands of tombstones. On the benchmark machine (a 13th Gen Intel Core i7-13620H on Linux), a `Get` in a memtable with 8,192 tombstones took 0.23 µs, against 0.20 µs with none. [Memtable](../architecture/memtable.md) explains the index.
 
 ## DeleteFilesInRange
 
@@ -71,6 +68,17 @@ db.CompactRange("log:0000"u8.ToArray(), "log:5000"u8.ToArray(), log);
 ## The Raft log pattern
 
 Kommander removes the dead prefix of a partition log this way:
+
+```mermaid
+flowchart LR
+    subgraph Batch[One write batch]
+        F[Put the new floor in metadata]
+        T[DeleteRange below the floor]
+    end
+    Batch --> M[Active memtable]
+    M -- flush drops the covered entries --> S[New SSTable: live entries only]
+    O[Old SSTables below the floor] -- DeleteFilesInRange --> X[Dropped with no rewrite]
+```
 
 1. Write the new compaction floor to the metadata and a range tombstone below the floor, in one batch.
 2. The tombstone stays in the active memtable. When that memtable flushes, the flush drops the log rows that the tombstone covers, so they never reach an SSTable.

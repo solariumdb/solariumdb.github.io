@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # Reads and Iterators
 
-Reads in Solarium take no locks. Each read sees the database at one sequence number, so it never sees part of a batch. This guide explains point reads, iterators, upper bounds, and how long an iterator keeps its snapshot.
+Reads in Solarium take no locks. Each write gets a **sequence number**, a counter that only grows. Each read sees the database at one sequence number, so it never sees part of a batch. This guide explains point reads, iterators, upper bounds, and how long an iterator keeps its snapshot.
 
 ## Point reads
 

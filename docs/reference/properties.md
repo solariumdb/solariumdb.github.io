@@ -33,7 +33,7 @@ These are the same for every column family.
 | Property | Value |
 | --- | --- |
 | `rocksdb.num-running-flushes` | 0 or 1. There is one flush thread. |
-| `rocksdb.num-running-compactions` | 0 or 1. There is one compaction thread. |
+| `rocksdb.num-running-compactions` | The compactions that run now, from 0 to `MaxBackgroundCompactions`. |
 | `rocksdb.is-write-stopped` | 1 while writes are stopped, else 0. |
 | `rocksdb.actual-delayed-write-rate` | The rate in bytes per second while writes are delayed, else 0. |
 

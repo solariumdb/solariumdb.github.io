@@ -60,6 +60,10 @@ So the current WAL file is flushed before the manifest save. No record before th
 
 A new WAL file starts at the first write group after a memtable switch, not at the switch. So after `Flush`, the WAL file changes at the next write group.
 
+## Paced writes
+
+With a `RateLimiter`, a flush asks for the bytes of each 1 MiB write of its SSTable at high priority, so it goes before the compactions. With `BytesPerSync`, it starts the writeback of its table as it writes it. See [Paced writes](compaction.md#paced-writes).
+
 ## Failures
 
 A flush failure, like a WAL failure, stops all later writes until the database opens again. Reads continue. A crash before the manifest save leaves the new table as an orphan, and the next open deletes it. A crash after the save can leave old WAL files on disk. The next open replays them and skips the entries that an SSTable already holds.
