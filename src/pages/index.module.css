@@ -1,0 +1,438 @@
+/*
+ * Homepage. A plum-black canvas with violet and mint light from the logo.
+ * Mint marks primary actions and live signals only. Violet is for surfaces and decoration.
+ */
+.heroBanner,
+.primarySection,
+.bandSection {
+  --ink: #120d1a;
+  --ink-deep: #0d0913;
+  --plum: #1a1324;
+  --plum-raised: #221a2f;
+  --line: #2b2238;
+  --line-strong: #3a2f4a;
+  --text: #f6f3fb;
+  --text-muted: #a59cb5;
+  --text-faint: #6b6279;
+  --violet: #a64bf6;
+  --blue: #5e83da;
+  --mint: #3ee6b0;
+}
+
+.heroBanner {
+  position: relative;
+  overflow: hidden;
+  padding: 7rem 0 6rem;
+  color: var(--text);
+  background-color: var(--ink);
+  background-image:
+    radial-gradient(60% 70% at 18% 0%, rgba(166, 75, 246, .22), transparent 70%),
+    radial-gradient(45% 55% at 88% 70%, rgba(62, 230, 176, .14), transparent 70%),
+    radial-gradient(35% 40% at 60% 30%, rgba(94, 131, 218, .12), transparent 70%);
+}
+
+.heroInner { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(25rem, .95fr); gap: 3rem; align-items: center; }
+
+.heroContent {
+  text-align: left;
+}
+
+.heroEyebrow,
+.sectionEyebrow {
+  margin: 0 0 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--mint);
+  font-family: var(--ifm-font-family-monospace);
+}
+
+.heroTitle {
+  margin: 0;
+  max-width: 13ch;
+  color: var(--text);
+  font-size: clamp(3.2rem, 5.6vw, 5.2rem);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -.045em;
+}
+
+.heroSubtitle {
+  max-width: 40rem;
+  margin: 1.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 1.13rem;
+  line-height: 1.65;
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 2.25rem;
+}
+
+.primaryButton, .secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.85rem;
+  padding: .7rem 1.15rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font-size: .92rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+}
+
+/* The one filled control on the page: mint, with a mint-tinted glow below it. */
+.primaryButton {
+  background: var(--mint);
+  color: var(--ink-deep);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .45),
+    0 12px 24px -10px rgba(62, 230, 176, .45);
+}
+
+.secondaryButton {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, .02);
+  color: var(--text);
+}
+
+.primaryButton:hover {
+  background: #64ebbf;
+  color: var(--ink-deep);
+  text-decoration: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .5),
+    0 16px 30px -10px rgba(62, 230, 176, .6);
+}
+
+.secondaryButton:hover {
+  border-color: var(--violet);
+  background: rgba(166, 75, 246, .1);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.proofGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  max-width: 40rem;
+  margin-top: 2.75rem;
+}
+
+.proofPill {
+  padding: .4rem .85rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 9999px;
+  background: rgba(26, 19, 36, .7);
+  color: var(--text-muted);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: .72rem;
+  letter-spacing: .02em;
+}
+
+.proofPill::before {
+  content: '';
+  display: inline-block;
+  width: .4rem;
+  height: .4rem;
+  margin-right: .5rem;
+  border-radius: 50%;
+  background: var(--mint);
+  vertical-align: .08rem;
+}
+
+/* Hero media: the logo, lit from behind, over a small LSM-tree panel. */
+.heroMedia { position: relative; min-height: 31rem; }
+
+.heroLogo {
+  position: absolute;
+  z-index: 3;
+  top: -1.5rem;
+  right: -1rem;
+  width: 11rem;
+  filter: drop-shadow(0 0 28px rgba(166, 75, 246, .45)) drop-shadow(0 0 48px rgba(62, 230, 176, .2));
+}
+
+.systemPanel {
+  position: absolute;
+  inset: 4rem 1.5rem 0 0;
+  z-index: 2;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 24px;
+  background:
+    linear-gradient(130deg, rgba(166, 75, 246, .16) 0%, rgba(26, 19, 36, 0) 55%),
+    rgba(18, 13, 26, .92);
+}
+
+.panelBar, .panelFooter {
+  display: flex;
+  justify-content: space-between;
+  padding: .85rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-muted);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: .64rem;
+  letter-spacing: .08em;
+}
+
+.panelState { color: var(--mint); }
+.panelFooter { position: absolute; right: 0; bottom: 0; left: 0; border-top: 1px solid var(--line); border-bottom: 0; color: var(--text-faint); }
+
+.treeMap { display: flex; flex-direction: column; gap: .95rem; height: 22rem; padding: 1.6rem 1.5rem 3.5rem; }
+.walRow, .levelRow { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr); gap: .75rem; align-items: center; }
+.levelName { color: var(--text-faint); font-family: var(--ifm-font-family-monospace); font-size: .66rem; letter-spacing: .08em; }
+.walTrack { position: relative; height: 1.4rem; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--ink-deep); }
+
+/* The WAL grows with each write group, and shrinks when a flush lets an old WAL file go. */
+.walFill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 7px;
+  background: linear-gradient(90deg, rgba(166, 75, 246, .75), rgba(94, 131, 218, .7) 55%, rgba(62, 230, 176, .8));
+  box-shadow: 0 0 12px rgba(62, 230, 176, .25);
+  transition: width .85s cubic-bezier(.4, 0, .2, 1);
+}
+
+.memtable { position: relative; height: 1.9rem; overflow: hidden; border: 1px solid rgba(62, 230, 176, .6); border-radius: 8px; background: rgba(62, 230, 176, .06); transition: border-color .4s ease, box-shadow .4s ease; }
+.memtableFill { position: absolute; top: 0; bottom: 0; left: 0; background: repeating-linear-gradient(90deg, rgba(62, 230, 176, .55) 0 6px, rgba(62, 230, 176, .22) 6px 8px); transition: width .85s cubic-bezier(.4, 0, .2, 1); }
+.memtableFlushed { border-color: var(--mint); box-shadow: 0 0 14px rgba(62, 230, 176, .35); }
+
+.fileRow { display: flex; flex-wrap: nowrap; gap: .35rem; min-height: 1.9rem; }
+
+.sstFile {
+  flex: none;
+  width: 1.6rem;
+  height: 1.9rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--plum-raised);
+  animation: fileEnter .6s cubic-bezier(.2, .8, .2, 1);
+  transition: width .6s ease, margin .6s ease, opacity .5s ease, transform .5s ease, border-color .4s ease, background .4s ease, box-shadow .4s ease;
+}
+
+.levelRow:nth-child(3) .sstFile { border-color: var(--violet); background: rgba(166, 75, 246, .18); }
+.levelRow:nth-child(4) .sstFile { border-color: #7c63e6; background: rgba(124, 99, 230, .14); }
+.levelRow:nth-child(5) .sstFile { border-color: var(--blue); background: rgba(94, 131, 218, .12); }
+.levelRow:last-child .sstFile { border-color: rgba(62, 230, 176, .55); background: rgba(62, 230, 176, .07); }
+
+/* The files that a flush, compaction, move, or floor drop is working on. */
+.levelRow .sstFile.sstFileBusy {
+  border-color: var(--mint);
+  background: rgba(62, 230, 176, .2);
+  box-shadow: 0 0 10px rgba(62, 230, 176, .5);
+}
+
+/* A file that leaves its level collapses in place; the negative margin cancels the row gap. */
+.levelRow .sstFile.sstFileGone {
+  width: 0;
+  margin-right: -.35rem;
+  border-width: 0;
+  opacity: 0;
+  transform: scale(.6);
+}
+
+.sequence { animation: sequenceFlash .45s ease-out; }
+.activity { animation: activityIn .4s ease-out; }
+
+@keyframes fileEnter {
+  from { opacity: 0; transform: scale(.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes sequenceFlash {
+  0% { color: var(--mint); text-shadow: 0 0 7px rgba(62, 230, 176, .8); }
+  100% { color: var(--text-faint); text-shadow: none; }
+}
+
+@keyframes activityIn {
+  0% { color: var(--mint); opacity: 0; }
+  40% { opacity: 1; }
+  100% { color: var(--text-muted); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .walFill, .memtableFill, .sstFile { transition: none; }
+  .sstFile, .sequence, .activity { animation: none; }
+}
+
+/* Sections. */
+.primarySection { padding: 6.5rem 0; background: var(--ink); color: var(--text); }
+
+.bandSection {
+  padding: 6.5rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--ink-deep);
+  color: var(--text);
+}
+
+.sectionHeading { max-width: 46rem; margin-bottom: 3rem; }
+
+.sectionEyebrow { margin-bottom: .75rem; }
+
+.sectionTitle {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(2.1rem, 3.6vw, 3.1rem);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -.035em;
+}
+
+.sectionSubtitle {
+  margin: 0.9rem 0 0;
+  color: var(--text-muted);
+  font-size: 1.06rem;
+  line-height: 1.6;
+}
+
+/* Cards: plum surfaces with a thin border. The first card carries the violet nebula. */
+.cardGrid, .calloutRow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.testingGrid, .fitGrid, .usedByGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+
+.advantageCard, .fitCard, .calloutCard, .usedByCard {
+  min-height: 14rem;
+  padding: 1.75rem;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--plum);
+}
+
+.advantageCard:first-child {
+  border-color: rgba(166, 75, 246, .55);
+  background: linear-gradient(130deg, rgba(166, 75, 246, .32) 0%, rgba(26, 19, 36, 0) 70%), var(--plum);
+}
+
+.cardTitle {
+  margin: 0 0 .85rem;
+  color: var(--text);
+  font-size: 1.12rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+.cardDescription { margin: 0; color: var(--text-muted); line-height: 1.65; }
+
+.usedByCard {
+  display: block;
+  min-height: 12rem;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color .18s ease, background .18s ease;
+}
+
+.usedByCard:hover {
+  border-color: rgba(62, 230, 176, .5);
+  background: linear-gradient(130deg, rgba(62, 230, 176, .12) 0%, rgba(26, 19, 36, 0) 70%), var(--plum);
+  color: inherit;
+  text-decoration: none;
+}
+
+.fitCard:first-child { border-color: rgba(62, 230, 176, .35); }
+
+.fitList {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+}
+
+.fitList li + li {
+  margin-top: 0.5rem;
+}
+
+.inlineLink {
+  display: inline-block;
+  margin-top: 1.5rem;
+  color: var(--mint);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: .78rem;
+  text-decoration: none;
+}
+
+.inlineLink:hover { color: #8af0cf; text-decoration: none; }
+.inlineLink::after { content: ' →'; }
+
+.footerActions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 2.5rem;
+}
+
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 3rem 1rem;
+  }
+
+  .heroInner {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .heroContent {
+    text-align: center;
+  }
+
+  .heroTitle {
+    max-width: none;
+    margin: 0 auto;
+    font-size: 3rem;
+  }
+
+  .heroSubtitle {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .buttons,
+  .proofGrid {
+    justify-content: center;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .heroMedia {
+    width: 100%;
+    min-height: 27rem;
+    margin-top: 1.5rem;
+  }
+
+  .heroLogo { width: 8rem; top: -1rem; right: 0; }
+  .systemPanel { inset: 3rem 0 0; }
+  .panelBar { padding-right: 8.5rem; }
+
+  .cardGrid,
+  .fitGrid,
+  .usedByGrid,
+  .testingGrid,
+  .calloutRow {
+    grid-template-columns: 1fr;
+  }
+
+  .sectionTitle {
+    font-size: 1.9rem;
+  }
+}
+
+@media screen and (max-width: 600px) {
+  .heroBanner { padding: 3.5rem 0; }
+  .heroTitle { font-size: 2.6rem; }
+  .proofGrid { margin-top: 2.25rem; }
+  .heroMedia { min-height: 26.5rem; }
+  .heroLogo { width: 6.5rem; }
+  .panelBar { padding-right: 7rem; }
+  .treeMap { padding: 1.25rem 1rem 3.5rem; gap: .7rem; }
+  .sstFile { width: 1.1rem; }
+  .panelFooter { font-size: .5rem; }
+}

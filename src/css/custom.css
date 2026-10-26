@@ -1,0 +1,217 @@
+/*
+ * Solarium theme, from the colors of the logo: violet, blue, and mint on deep indigo.
+ * Light mode uses violet as the primary color, because mint has too little contrast on white.
+ * Dark mode uses mint as the "on" signal for links and primary actions, and violet for decoration.
+ * Depth comes from surface layers and thin borders, not from shadows.
+ */
+:root {
+  --sol-violet: #a64bf6;
+  --sol-blue: #5e83da;
+  --sol-mint: #3ee6b0;
+  --sol-gradient: linear-gradient(120deg, #a64bf6 0%, #5e83da 50%, #3ee6b0 100%);
+
+  --ifm-color-primary: #7c3aed;
+  --ifm-color-primary-dark: #702be8;
+  --ifm-color-primary-darker: #6a24e2;
+  --ifm-color-primary-darkest: #561cbb;
+  --ifm-color-primary-light: #8b50ef;
+  --ifm-color-primary-lighter: #925bf0;
+  --ifm-color-primary-lightest: #a77cf3;
+  --ifm-code-font-size: 95%;
+  --ifm-heading-letter-spacing: 0;
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --ifm-font-family-monospace: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ifm-global-radius: 8px;
+  --ifm-code-border-radius: 6px;
+  --ifm-card-border-radius: 16px;
+  --ifm-breadcrumb-item-background-active: transparent;
+  --ifm-toc-border-color: #ebe6f5;
+  --ifm-hr-background-color: #ebe6f5;
+  --ifm-table-border-color: #e4def0;
+  --ifm-table-stripe-background: #faf8fe;
+  --docusaurus-highlighted-code-line-bg: rgba(124, 58, 237, 0.10);
+}
+
+html[data-theme='dark'] {
+  --ifm-color-primary: #3ee6b0;
+  --ifm-color-primary-dark: #27e2a6;
+  --ifm-color-primary-darker: #1fd79c;
+  --ifm-color-primary-darkest: #19b081;
+  --ifm-color-primary-light: #58e9ba;
+  --ifm-color-primary-lighter: #64ebbf;
+  --ifm-color-primary-lightest: #8af0cf;
+
+  --ifm-background-color: #120d1a;
+  --ifm-background-surface-color: #1a1324;
+  --ifm-navbar-background-color: rgba(18, 13, 26, 0.86);
+  --ifm-color-content: #e6e1ef;
+  --ifm-color-content-secondary: #a59cb5;
+  --ifm-heading-color: #f6f3fb;
+  --ifm-toc-border-color: #2b2238;
+  --ifm-hr-background-color: #2b2238;
+  --ifm-table-border-color: #2e2540;
+  --ifm-table-stripe-background: rgba(166, 75, 246, 0.04);
+  --ifm-code-background: #221a2f;
+  --ifm-menu-color: #c3bad2;
+  --ifm-menu-color-background-active: rgba(62, 230, 176, 0.08);
+  --ifm-menu-color-background-hover: rgba(166, 75, 246, 0.10);
+  --ifm-dropdown-background-color: #1a1324;
+  --ifm-color-emphasis-200: #2b2238;
+  --ifm-color-emphasis-300: #3a2f4a;
+  --docusaurus-highlighted-code-line-bg: rgba(62, 230, 176, 0.12);
+}
+
+div.markdown a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+/* Navbar: a translucent bar with a thin border, as a layer above the page. */
+.navbar {
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+  box-shadow: none;
+}
+
+html[data-theme='dark'] .navbar {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.navbar__title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Sidebar: the active page has a mint (dark) or violet (light) marker on its left edge. */
+.menu__link--active:not(.menu__link--sublist) {
+  box-shadow: inset 2px 0 0 var(--ifm-color-primary);
+}
+
+/* Headings in docs. */
+.markdown h1 {
+  letter-spacing: -0.02em;
+}
+
+/* Code blocks: a plum surface in dark mode with a thin border. */
+.theme-code-block {
+  border: 1px solid var(--ifm-toc-border-color);
+  box-shadow: none !important;
+}
+
+html[data-theme='dark'] .theme-code-block {
+  --prism-background-color: #1a1324 !important;
+}
+
+/* Prism also sets the background inline on the pre element. */
+html[data-theme='dark'] .theme-code-block pre.prism-code {
+  background-color: var(--prism-background-color) !important;
+}
+
+/* Tables: thin borders, no heavy header fill. */
+.markdown table thead tr {
+  border-bottom: 2px solid var(--ifm-table-border-color);
+}
+
+html[data-theme='dark'] .markdown table thead th {
+  background: rgba(166, 75, 246, 0.08);
+}
+
+/* Admonitions: a thin border and a tinted surface, not a solid left bar. */
+.theme-admonition {
+  border-radius: 12px;
+}
+
+html[data-theme='dark'] .alert--secondary {
+  --ifm-alert-background-color: rgba(166, 75, 246, 0.10);
+  --ifm-alert-background-color-highlight: rgba(166, 75, 246, 0.16);
+  --ifm-alert-foreground-color: #e6e1ef;
+  --ifm-alert-border-color: #a64bf6;
+}
+
+html[data-theme='dark'] .alert--success {
+  --ifm-alert-background-color: rgba(62, 230, 176, 0.08);
+  --ifm-alert-background-color-highlight: rgba(62, 230, 176, 0.14);
+  --ifm-alert-foreground-color: #e6e1ef;
+  --ifm-alert-border-color: #3ee6b0;
+}
+
+html[data-theme='dark'] .alert--info {
+  --ifm-alert-background-color: rgba(94, 131, 218, 0.10);
+  --ifm-alert-background-color-highlight: rgba(94, 131, 218, 0.16);
+  --ifm-alert-foreground-color: #e6e1ef;
+  --ifm-alert-border-color: #5e83da;
+}
+
+html[data-theme='light'] .alert--secondary {
+  --ifm-alert-background-color: #f6f1fe;
+  --ifm-alert-background-color-highlight: #ece2fd;
+  --ifm-alert-border-color: #8b50ef;
+}
+
+/* Shared footer for the documentation and homepage. */
+.footer {
+  --ifm-footer-background-color: #0d0913;
+  border-top: 1px solid #2b2238;
+  background: #0d0913;
+  color: #8a8199;
+  padding: 2.5rem 0 1.5rem;
+}
+
+.footer__links {
+  margin-bottom: 2rem;
+}
+
+.footer__col {
+  max-width: 15rem;
+}
+
+.footer__title {
+  margin-bottom: .85rem;
+  color: #e6e1ef;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: .72rem;
+  font-weight: 500;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.footer__item {
+  line-height: 1.45;
+}
+
+.footer__link-item {
+  color: #a59cb5;
+  font-size: .9rem;
+}
+
+.footer__link-item:hover {
+  color: #3ee6b0;
+  text-decoration: none;
+}
+
+.footer__copyright {
+  padding-top: 1.25rem;
+  border-top: 1px solid #2b2238;
+  color: #6b6279;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: .7rem;
+  letter-spacing: .04em;
+}
+
+/* The homepage is dark in both color modes, so its navbar stays dark too. */
+html.plugin-pages[data-theme='light'] .navbar {
+  --ifm-navbar-link-color: #e6e1ef;
+  --ifm-navbar-link-hover-color: #3ee6b0;
+  border-bottom-color: #2b2238;
+  background-color: rgba(18, 13, 26, 0.86);
+  color: #e6e1ef;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+html.plugin-pages[data-theme='light'] .navbar__title,
+html.plugin-pages[data-theme='light'] .navbar__toggle,
+html.plugin-pages[data-theme='light'] .navbar [class*='colorModeToggle'] button {
+  color: #e6e1ef;
+}

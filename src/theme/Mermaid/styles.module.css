@@ -1,0 +1,9 @@
+.container {
+  max-width: 100%;
+  margin-bottom: var(--ifm-leading);
+  text-align: center;
+}
+
+.container > svg {
+  max-width: 100%;
+}
