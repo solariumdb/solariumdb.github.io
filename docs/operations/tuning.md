@@ -13,12 +13,15 @@ Each column family uses at most `WriteBufferSize × MaxWriteBufferNumber` bytes 
 The memtables are on the managed heap. So:
 
 - the .NET garbage collector sees them, and their size counts toward its budget;
-- a large memtable makes more work for gen 2 collections;
-- there is no shared memtable budget across column families or databases yet.
+- a large memtable makes more work for gen 2 collections.
 
 For many column families, lower `WriteBufferSize` on the column families with few writes. Do not set it below a few megabytes, because each flush makes one level 0 file.
 
-Solarium has no block cache. The page cache of the operating system caches the SSTables. The open SSTables keep their index, Bloom filter, and range tombstones in memory. `rocksdb.estimate-table-readers-mem` reports that size.
+To cap the memtables of all the column families, or of several databases, use a `WriteBufferManager` (`DbOptions.WriteBufferManager`), or `DbOptions.DbWriteBufferSize` for one database. Past the cap, the database that writes next flushes its oldest memtable. It never stalls writes.
+
+The open SSTables keep their index, Bloom filters, and range tombstones in memory: about 2% of the table bytes, and 4% with LZ4. `rocksdb.estimate-table-readers-mem` reports that size. It grows with the data on disk. To bound it, put the index and filter blocks in a block cache (`ColumnFamilyOptions.BlockCache` with `CacheIndexAndFilterBlocks`). Size the cache to hold them all. A smaller cache reads partitions again on its misses, and lookups slow down.
+
+The page cache of the operating system caches the data blocks. Solarium never caches them itself. See [Block Cache and Memtable Budget](../guides/memory.md).
 
 ## Write throughput
 
@@ -41,7 +44,9 @@ The Kommander WAL uses this tuning for its shard column families: 128 MiB memtab
 ## Read latency
 
 - Keep the number of level 0 files low. Each level 0 file is one more source for each read.
-- Keep the data in the page cache when you can. With no block cache, a read of a block that is not in the page cache goes to the drive.
+- Keep the data in the page cache when you can. Data blocks have no cache in the process, so a read of a block that is not in the page cache goes to the drive.
+- With a block cache, size it to hold every index and filter partition, and pin level 0 with `PinL0FilterAndIndexBlocksInCache`.
+- Read many keys with `MultiGet`, not one `Get` for each key. It reads their data blocks in one batch.
 - Prefer `Next` to `Prev`. A `Prev` step searches every source.
 - Dispose iterators quickly, so that compaction can delete old files.
 

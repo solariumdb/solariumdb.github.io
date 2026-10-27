@@ -51,6 +51,8 @@ A failure names its seed and keeps the directories of the run. Some seeds change
 
 - Seeds 4 to 7 of each eight run four compaction threads, so compactions run side by side.
 - Seeds 8 to 15 of each sixteen pace their SSTables with a `RateLimiter`, and start their writeback every 16 KB with `BytesPerSync`.
+- Seeds 16 to 31 of each thirty-two cap their memtables across column families at 24 KB with `DbWriteBufferSize`.
+- Seeds 32 to 63 of each sixty-four keep their index and filter blocks in a 4 KB block cache, which reads them again on most lookups. An odd seed also pins level 0.
 
 ## Kill tests
 
@@ -61,7 +63,7 @@ A failure names its seed and keeps the directories of the run. Some seeds change
 3. The test kills it at a random moment, sometimes while it still opens the database.
 4. The test reopens the directory and checks it against the reports.
 
-A killed process loses nothing that the operating system holds. So every acknowledged batch must be there, synced or not, and the batch in flight must be there whole or not at all. Each run kills three workers in a row in one directory. As in the power-loss tests, seeds 4 to 7 of each eight run four compaction threads, and seeds 8 to 15 of each sixteen pace their SSTables. The suite runs 4 runs on each environment. `SOLARIUM_KILL_ITERATIONS` and `SOLARIUM_KILL_SEED` change that.
+A killed process loses nothing that the operating system holds. So every acknowledged batch must be there, synced or not, and the batch in flight must be there whole or not at all. Each run kills three workers in a row in one directory. As in the power-loss tests, seeds 4 to 7 of each eight run four compaction threads, seeds 8 to 15 of each sixteen pace their SSTables, seeds 16 to 31 of each thirty-two cap their memtables, and seeds 32 to 63 of each sixty-four use a small block cache. The suite runs 4 runs on each environment. `SOLARIUM_KILL_ITERATIONS` and `SOLARIUM_KILL_SEED` change that.
 
 ## Concurrent compaction tests
 

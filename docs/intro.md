@@ -49,7 +49,8 @@ This design makes writes fast, because a write is one append and one insert in m
 | **Leveled compaction** | The seven levels of RocksDB, with its dynamic level sizing. |
 | **Checkpoints** | A consistent copy of the database in a new directory, with hard links to the SSTables. |
 | **Group commit** | Writes from many threads share their WAL appends and flushes. |
-| **Lock-free reads** | Reads take no locks, on a lock-free skip-list memtable. |
+| **Lock-free reads** | Reads take no engine locks, on a lock-free skip-list memtable. |
+| **Block cache and memtable budget** | One cache for the index and filter blocks, and one cap on the memtables, shared by several databases if you want. |
 | **Storage environments** | All file I/O goes through an interface. The default works everywhere. An io_uring storage environment is available for Linux. |
 
 Every member is safe to call from any thread.
@@ -59,7 +60,7 @@ Every member is safe to call from any thread.
 | Package | What it is |
 | --- | --- |
 | `Solarium` | The store. Pure managed code, on every platform that .NET 10 runs on. |
-| `Solarium.IoUring` | A storage environment for Linux 6.1 or later that does its file I/O through io_uring, on the [ioxide](https://github.com/MDA2AV/ioxide) runtime. |
+| `Solarium.IoUring` | A storage environment for Linux 6.1 or later that does its file writes through io_uring, on the [ioxide](https://github.com/MDA2AV/ioxide) runtime. A `MultiGet` also sends the reads that the page cache misses to the ring together. |
 | `Solarium.Kommander` | `SolariumWAL`, a Kommander `IWAL` on Solarium, with the on-disk layout of the `RocksDbWAL` of Kommander. |
 | `Solarium.Kahuna` | A [Kahuna](https://kahunakv.github.io/) storage engine: the persistence backend and the Raft WAL on Solarium. A Kahuna server loads it with `--extension-assembly`. |
 
@@ -99,7 +100,7 @@ db.DeleteRange("log:0000"u8, "log:0001"u8);
 - The embedded API, column families, atomic batches across them, `DeleteRange`, and iterators with an upper bound.
 - Group commit with pipelined writes, and lock-free reads on a skip-list memtable.
 - WAL recovery that cuts a torn tail and refuses damage to flushed data. Power-loss tests and kill tests check it.
-- Memtable flushes to SSTables, LZ4 block compression, WAL rotation with a size cap, the manifest, leveled compaction into the seven levels of RocksDB with its dynamic level sizing, up to `MaxBackgroundCompactions` compactions at once, a rate limiter and `BytesPerSync` for flushes and compactions, `DeleteFilesInRange`, checkpoints, and write stalls.
+- Memtable flushes to SSTables, LZ4 block compression, WAL rotation with a size cap, the manifest, leveled compaction into the seven levels of RocksDB with its dynamic level sizing, up to `MaxBackgroundCompactions` compactions at once, a rate limiter and `BytesPerSync` for flushes and compactions, a memtable budget shared across databases (`WriteBufferManager`), a block cache that bounds the memory of the index and filter blocks and can hold the memtable budget too, `DeleteFilesInRange`, checkpoints, and write stalls.
 - The RocksDB properties and the live-file metadata that Kommander reads.
 - `Solarium.Kommander`. It passes the conformance suite of Kommander for WAL backends and the behavior tests of its RocksDB backend. It runs three-node Kommander clusters in the tests and publishes the engine `raft.wal.*` metrics.
 - `Solarium.Kahuna`, a port of the RocksDB persistence backend of Kahuna that passes its behavior tests.
@@ -107,7 +108,7 @@ db.DeleteRange("log:0000"u8, "log:0001"u8);
 ## What is not done yet
 
 - **Recovery from an engine failure without a reopen.** After a WAL, flush, or compaction failure, the database refuses all writes until you open it again. `SolariumWAL` reopens it automatically.
-- **A shared block cache and memtable budget.** Solarium has no block cache. The page cache of the operating system is the only cache.
+- **A cache for data blocks.** The block cache holds index and filter blocks only. The page cache of the operating system serves the data blocks.
 - **Subcompactions and more than one flush thread.** One merge always runs on one thread, as with `max_subcompactions` of 1 in RocksDB. Flushes have one thread.
 
 ## Where to go next
@@ -120,5 +121,6 @@ db.DeleteRange("log:0000"u8, "log:0001"u8);
 | Use Solarium as the Raft log of Kommander | [Solarium.Kommander](integrations/kommander.md) |
 | Run a Kahuna node on Solarium | [Solarium.Kahuna](integrations/kahuna.md) |
 | Know what a write survives | [Durability](operations/durability.md) |
+| Bound the memory of several databases | [Block Cache and Memtable Budget](guides/memory.md) |
 | Look up a member or an option | [API Reference](reference/api.md) and [Options](reference/options.md) |
 | Know how the engine works inside | [Architecture Overview](architecture/overview.md) |

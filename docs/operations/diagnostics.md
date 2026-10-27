@@ -44,7 +44,9 @@ static void Report(SolariumDb db)
 | Writes hang | `rocksdb.is-write-stopped` is 1 | A column family has `Level0StopWritesTrigger` level 0 files. |
 | Reads are slow | `rocksdb.num-files-at-level0` is high | Each level 0 file is one more source for each read. |
 | Memory grows | `rocksdb.cur-size-all-mem-tables` | The memtables of the column family. |
-| Memory grows | `rocksdb.estimate-table-readers-mem` | The index, filter, and range tombstones of the open SSTables. |
+| Memory grows | `rocksdb.estimate-table-readers-mem` | The index, filter, and range tombstones of the open SSTables. With `CacheIndexAndFilterBlocks`, the range tombstones only. |
+| Memory grows | `rocksdb.block-cache-usage` and `rocksdb.block-cache-pinned-usage` | The bytes in the block cache of the column family, for everything that shares it. Pinned bytes cannot be evicted. |
+| Reads are slow with a block cache | `rocksdb.block-cache-usage` at `rocksdb.block-cache-capacity` | The cache is full, and lookups can read partitions again. See [Size the cache](../guides/memory.md#size-the-cache). |
 | Flushes fall behind | `rocksdb.mem-table-flush-pending` is 1 | A memtable waits for a flush that has not started. |
 | Compaction falls behind | `rocksdb.compaction-pending` is 1 | A level needs a compaction. |
 
@@ -74,4 +76,4 @@ The keys are copies that belong to you.
 
 - `cur-size-all-mem-tables` counts the keys and values of each memtable, plus 32 bytes for each entry, and the fragments of its range tombstones. An empty memtable is 0. RocksDB counts the arena blocks that it allocated, 2 KB for an empty memtable.
 - `estimate-table-readers-mem` counts the index keys and handles, the filter bits, and the range tombstones and their fragments of each open table. It does not count allocations.
-- `block-cache-usage` and `block-cache-pinned-usage` return null, as in RocksDB with no block cache.
+- `block-cache-capacity`, `block-cache-usage`, and `block-cache-pinned-usage` return null for a column family without a `BlockCache`, as in RocksDB with no block cache.

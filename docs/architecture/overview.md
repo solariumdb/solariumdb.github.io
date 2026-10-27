@@ -41,7 +41,8 @@ The manifest records the live files, and the storage environment does all file I
 | **Version** | An immutable list of the memtables and SSTables of a column family. A read uses one version. | [Read Path](read-path.md) |
 | **Flush thread** | Writes immutable memtables to level 0 SSTables. | [Flushes](flushes.md) |
 | **Compaction threads** | Merge and move SSTables down the seven levels, up to `MaxBackgroundCompactions` at once. | [Compaction](compaction.md) |
-| **SSTable** | An immutable sorted file with data blocks, a Bloom filter, and an index. | [SSTables](sstables.md) |
+| **SSTable** | An immutable sorted file with data blocks, and an index and Bloom filters cut into partitions. | [SSTables](sstables.md) |
+| **Block cache** | Optional. Holds the index and filter partitions of the SSTables, and can hold the memtable budget too. | [Block Cache and Memtable Budget](../guides/memory.md) |
 | **Manifest** | The list of live WAL files, column families, SSTables, and flush points. | [Data Directory](../reference/data-directory.md) |
 | **Storage environment** | All file I/O: default or io_uring. | [Storage Environments](storage-environments.md) |
 
@@ -74,7 +75,7 @@ A version never changes after it is published. A memtable switch, a finished flu
 | Thread | Work |
 | --- | --- |
 | Your writer threads | One of them leads each write group. Each one inserts its own batch into the memtable. |
-| Your reader threads | Reads take no locks. |
+| Your reader threads | Reads take no engine locks. With a block cache, a lookup takes the lock of one cache shard. |
 | `solarium-flush` | One background thread for all flushes. |
 | `solarium-compaction-0`, `-1`, ... | One thread for each of the `MaxBackgroundCompactions` compactions that can run at once, across all column families. The default is 1. |
 | The io_uring reactor | Only with the io_uring storage environment: one reactor thread for the reads and writes. |
@@ -87,14 +88,14 @@ A version never changes after it is published. A memtable switch, a finished flu
 | The state lock | Memtable switches, flush installs, compaction installs, and manifest changes. |
 | The directory `LOCK` file | The directory, against a second process. |
 
-Reads take none of these locks.
+Reads take none of these locks. A block cache has a lock for each of its shards, and a lookup in the cache takes one of them.
 
 ## Where Solarium follows RocksDB, and where it does not
 
 The design follows RocksDB in each part: group commit with pipelined writes, the skip-list memtable, the `SuperVersion`, leveled compaction with dynamic level sizing, a rate limiter for flush and compaction writes, fragmented range tombstones, and the property names. The main differences are:
 
 - one thread for each merge (no subcompactions), and one flush thread;
-- no block cache;
+- a block cache for index and filter blocks only;
 - a WAL record with a durable offset;
 - a manifest that is written again whole on each change.
 

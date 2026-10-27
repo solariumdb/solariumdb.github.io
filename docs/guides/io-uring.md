@@ -4,7 +4,7 @@ sidebar_position: 7
 
 # io_uring on Linux
 
-On Linux 6.1 or later, the `Solarium.IoUring` package lets the engine do its file I/O through io_uring, the asynchronous I/O interface of the Linux kernel, on the [ioxide](https://github.com/MDA2AV/ioxide) runtime. Today it is for measurement and experiments, not for speed. The engine issues one I/O at a time, and on that pattern io_uring is slower than the default storage environment. Use it only when your own measurements show a gain.
+On Linux 6.1 or later, the `Solarium.IoUring` package lets the engine do its file writes through io_uring, the asynchronous I/O interface of the Linux kernel, on the [ioxide](https://github.com/MDA2AV/ioxide) runtime. Its clear gain is `MultiGet` from the drive: the reads that the page cache misses are in flight together. On the `large` Kahuna dataset under a memory limit, `MultiGet` read 2.5 times as many keys from one thread as on the default storage environment, and 1.6 times from eight. Other reads match the default storage environment, and unsynced writes are slower. Use it only when your own measurements show a gain.
 
 All file I/O in Solarium goes through a **storage environment**, as with the `Env` of RocksDB. The default storage environment works on every platform. `Solarium.IoUring` adds a second one.
 
@@ -31,20 +31,21 @@ The constructor takes the size of the ring, `ringEntries`. The default is 256.
 
 ## How it works
 
-| Environment | Reads and writes | Flush |
-| --- | --- | --- |
-| `DefaultStorageEnvironment` (all platforms) | `RandomAccess` (pread and pwrite) | `RandomAccess.FlushToDisk` |
-| `IoUringStorageEnvironment` (Linux) | `IORING_OP_READ` and `IORING_OP_WRITE` on one ioxide reactor thread | `fdatasync` on the calling thread |
+| Environment | Writes | Reads | Batch reads (`MultiGet`) | Flush |
+| --- | --- | --- | --- | --- |
+| `DefaultStorageEnvironment` (all platforms) | `RandomAccess` (pwrite) | `RandomAccess` (pread) | One read after the other | `RandomAccess.FlushToDisk` |
+| `IoUringStorageEnvironment` (Linux) | `IORING_OP_WRITE` on one ioxide reactor thread | `pread` on the calling thread | `preadv2(RWF_NOWAIT)` on the calling thread, then the ring for what the page cache misses | `fdatasync` on the calling thread |
 
 ioxide has no fsync operation in its API. So the io_uring storage environment flushes with `fdatasync` on the calling thread, not through the ring.
 
+A table read is one blocking read, usually from the page cache. Through the ring, the reads of every thread ran one at a time on the reactor thread, at about half the rate of the default environment. So reads use `pread` on the calling thread. A batch read is different: the reads that miss the page cache go to the ring together, and the drive serves them at once.
+
 ## What io_uring costs
 
-Every read and write is a hand-off to the reactor thread, and the hand-off costs more than the system call that it replaces. Measured on Linux 6.1 with ext4 on an NVMe drive:
+Every write is a hand-off to the reactor thread, and the hand-off costs more than the system call that it replaces. Measured on Linux 6.1 with ext4 on an NVMe drive:
 
 | Operation | Default | io_uring |
 | --- | ---: | ---: |
-| 4 KB read from the page cache | 0.4 µs | 2.6 µs |
 | 4 KB write | 1.5 µs | 6.9 µs |
 | 64 KB write | 20 µs | 29 µs |
 | Unsynced `Put` from one thread | 3.0 µs | 6.9 µs |
@@ -52,11 +53,15 @@ Every read and write is a hand-off to the reactor thread, and the hand-off costs
 
 On this kernel, io_uring cannot complete a buffered ext4 write inline. It passes the write to one of its worker threads (`iou-wrk`), and the extra cost grows with the size of the write. A synced `Put` costs the same in both environments, because the device flush takes milliseconds and neither environment sends it through the ring.
 
+Reads on the calling thread have a cost too. Where readers keep every CPU busy, a write waits for the reactor thread to get a CPU. With six readers in a tight loop beside one writer on four CPUs, the writer flushed about a fifth of the tables that it flushed on the default environment.
+
+[Storage Environments](../architecture/storage-environments.md#reads-on-the-calling-thread) gives the read measurements.
+
 ## Cancelled operations
 
-The ring can complete a read or a write with `ECANCELED`. Then the environment does the operation again with `pread` or `pwrite` on the calling thread, and counts it in `IoUringStorageEnvironment.CanceledOperations`.
+The ring can complete a write with `ECANCELED`. Then the environment does the write again with `pwrite` on the calling thread, and counts it in `IoUringStorageEnvironment.CanceledOperations`.
 
-The retry is safe whatever the cause, because positional I/O at the same offset gives the same result. Without it, a cancelled WAL write would stop the writes of the database until it opens again. The exact cause of the `ECANCELED` is not confirmed.
+The retry is safe whatever the cause, because a positional write at the same offset leaves the same bytes. Without it, a cancelled WAL write would stop the writes of the database until it opens again. The exact cause of the `ECANCELED` is not confirmed.
 
 ## Run io_uring in Docker
 

@@ -9,7 +9,7 @@ A Solarium database is one directory. This page lists the files in it and what e
 | File | Content |
 | --- | --- |
 | `LOCK` | An exclusive lock. Only one open database can use the directory. |
-| `FORMAT` | The format version, `solarium-format 4`. |
+| `FORMAT` | The format version, `solarium-format 5`. |
 | `MANIFEST` | The live WAL files, the column families, their SSTables with the level of each, and the flush point of each column family. |
 | `NNNNNN.log` | A WAL file. |
 | `NNNNNN.sst` | An SSTable. |
@@ -22,9 +22,10 @@ A Solarium database is one directory. This page lists the files in it and what e
 
 ## FORMAT
 
-`FORMAT` holds the format version, `solarium-format 4`. Older directories move to format 4 at open:
+`FORMAT` holds the format version, `solarium-format 5`. Older directories move to format 5 at open:
 
-- A format-3 directory differs from format 4 in new SSTables only. Its version 2 tables still read until a compaction rewrites them.
+- A format-4 directory differs from format 5 in new SSTables only (table version 4, with a partitioned index and filter). Its version 3 tables still read until a compaction rewrites them.
+- A format-3 directory differs from format 4 in new SSTables only (table version 3, whose data blocks have a type and can be compressed). Its version 2 tables still read until a compaction rewrites them.
 - A format-2 directory differs from format 3 in new WAL files only. Its WAL files still replay.
 - A format-1 directory is migrated at open.
 

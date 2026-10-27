@@ -56,7 +56,7 @@ using IoUringStorageEnvironment environment = new();
 using SolariumWAL wal = new(path, "v1", logger, syncWrites: true, new SolariumWalOptions { Environment = environment });
 ```
 
-io_uring matches the default storage environment on synced writes, because their fsync does not go through the ring. It is slower on unsynced writes, because each write is a hand-off to the reactor thread. See [io_uring on Linux](../guides/io-uring.md).
+io_uring matches the default storage environment on synced writes, because their fsync does not go through the ring. It is slower on unsynced writes, because each write is a hand-off to the reactor thread. Reads use `pread` on the calling thread in both environments. See [io_uring on Linux](../guides/io-uring.md).
 
 ## Durability
 
@@ -94,6 +94,8 @@ The rows and keys are the same bytes, but the files are those of Solarium. A `Ro
 | `ShardLevel0StopWritesTrigger` | 44 | The level 0 files of a shard that stop writes. |
 | `MaxBackgroundCompactions` | the compactions of `clamp(CPUs / 2, 2, 8)` background jobs: 6 on 16 CPUs | The compactions that run at once. This matches the `max_background_jobs` of `RocksDbWAL`, which RocksDB splits into a quarter for flushes and the rest for compactions. |
 | `MaxTotalWalSizeFlushUnits` | 2 | The WAL size cap, in flush units. Past it, the column families that keep the oldest WAL file are flushed, so a shard with few writes does not keep every WAL file. 0 keeps the default of Solarium. |
+| `WriteBufferManager` | none | A cap on the memtables of the WAL and of the other Solarium databases of the host together. Past the cap, the database that writes next flushes its oldest memtable. The host owns it. |
+| `BlockCache` | none | A cache for the index and filter blocks of every column family of the WAL, pinned at level 0. It bounds the memory of the open tables, which otherwise grows with the log on disk. Give the `WriteBufferManager` the same cache to put the memtables under the same capacity. The host owns it. |
 | `Environment` | the default storage environment | Where the files go. |
 | `TickSource` | the system clock | The clock of the failure log cadence and of the probe interval. |
 
@@ -140,17 +142,19 @@ builder.Services.AddOpenTelemetry().WithMetrics(metrics => metrics
 | `raft.wal.write_stalled` | gauge | 1 while writes are stopped, else 0 (`rocksdb.is-write-stopped`). |
 | `raft.wal.shard_live_sst_bytes` | gauge, By | The live SSTable bytes of the shard column families. |
 | `raft.wal.shard_l0_files`, `raft.wal.shard_l6_files` | gauge | The SSTables of the shard column families in level 0 and in level 6, the bottom level. |
-| `raft.wal.table_readers_memory` | gauge, By | The bytes that the open SSTables keep in memory: index, filter, and range tombstones. |
+| `raft.wal.table_readers_memory` | gauge, By | The bytes that the open SSTables keep in memory: range tombstones, and index and filter blocks unless the block cache holds them. |
+| `raft.wal.block_cache_usage` | gauge, By | The bytes in the block cache of the WAL, the whole cache when it is shared. Only with `SolariumWalOptions.BlockCache`. |
+| `raft.wal.block_cache_pinned_usage` | gauge, By | The bytes of that cache that cannot be evicted: level 0 index and filter blocks, and memtable charges. |
 | `raft.wal.memtable_memory` | gauge, By | The bytes of the memtables of every column family, flushing ones included. |
 | `raft.wal.alive_log_bytes` | gauge, By | The bytes of the WAL files in the database directory, which a restart replays. |
 | `raft.wal.engine_reopens_total` | counter | Reopens of the database to clear a storage failure, tagged `outcome`: `success` or `failed`. |
 
-Each open `SolariumWAL` reports one measurement for each gauge, without tags, as each `RocksDbWAL` does. It stops at `Dispose`. Solarium has no block cache, so `raft.wal.block_cache_usage` and `raft.wal.block_cache_pinned_usage` have no counterpart. The instruments cost nothing while no listener is attached.
+Each open `SolariumWAL` reports one measurement for each gauge, without tags, as each `RocksDbWAL` does. It stops at `Dispose`. The two block cache gauges come only from a WAL with a `SolariumWalOptions.BlockCache`, and report the whole cache, as those of `RocksDbWAL` report its shared cache. The instruments cost nothing while no listener is attached.
 
 ## Differences from RocksDbWAL
 
-- **No shared resources.** `RocksDbSharedResources` (a block cache and a write-buffer manager that several databases share) has no equivalent yet.
-- **The engine gauges are on a second meter.** A host adds the `"Solarium.Kommander"` meter. There are no block cache gauges.
+- **The shared resources are two options.** `SolariumWalOptions.WriteBufferManager` is the write-buffer manager of `RocksDbSharedResources`. The WAL warns at open, as `RocksDbWAL` does, when its cap is below two shard memtables. `SolariumWalOptions.BlockCache` holds the index and filter blocks of every column family, pinned at level 0, as `RocksDbWAL` sets them on its shared path. A `WriteBufferManager` created with the same cache puts the memtables under its capacity too, as `CreateWithUnifiedBudget`. The cache holds no data blocks. The scans of dead rows (`CountPersistedLogs`, and the count of a compaction pass) read with `FillCache` off, as in `RocksDbWAL`.
+- **The engine gauges are on a second meter.** A host adds the `"Solarium.Kommander"` meter. A WAL without a block cache reports no block cache gauges.
 - **A write after `Dispose` throws** `ObjectDisposedException`, as a read does. `RocksDbWAL` reports it as a storage failure first and probes the volume of the closed WAL.
 - **A new WAL is one whose database holds nothing.** `RocksDbWAL` takes a WAL as new when its directory does not exist, and refuses an existing directory without a `version` key. So a directory that a host created first never opens, and neither does one that a crash left during the first open. `SolariumWAL` writes the version synced, before any row, and refuses only a database that holds data without a version.
 - **The header reader skips length-delimited fields correctly.** In `RocksDbWAL`, `ReadHeaderFromWire` and `ReadTermFromWire` skip a length-delimited field one byte short. Then a `Proposed` row with the log type `op` and a 32-byte payload reads with the first byte of the payload as its type, and the proposed-tail sweep can keep an uncommitted entry. `SolariumWAL` reads the length first, and refuses a length past the end of the row.

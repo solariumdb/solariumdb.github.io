@@ -70,7 +70,7 @@ The write-ahead log (WAL) is a file that only grows. Every batch goes to it as o
 
 ### Fsync and the page cache {#fsync}
 
-When a process writes to a file, the operating system first keeps the bytes in memory, in the page cache. An fsync, or a flush to the device, tells the operating system to write them to the drive and wait. An fsync takes far longer than a write to the page cache. Solarium has no block cache of its own, so the page cache is also the only cache of the SSTable data blocks. See [Tuning](operations/tuning.md#memory).
+When a process writes to a file, the operating system first keeps the bytes in memory, in the page cache. An fsync, or a flush to the device, tells the operating system to write them to the drive and wait. An fsync takes far longer than a write to the page cache. Solarium never caches SSTable data blocks itself, so the page cache is their only cache. See [Tuning](operations/tuning.md#memory).
 
 ### Synced and unsynced write {#synced-and-unsynced-write}
 
@@ -108,7 +108,7 @@ A flush writes an immutable memtable to disk as a level 0 SSTable. After the flu
 
 ### SSTable {#sstable}
 
-A sorted string table (SSTable) is a file of sorted keys and values that never changes after it is written. It holds data blocks, a Bloom filter that skips files without the key, and an index of the blocks. A compaction replaces SSTables. It never edits them. See [SSTables](architecture/sstables.md).
+A sorted string table (SSTable) is a file of sorted keys and values that never changes after it is written. It holds data blocks, an index of the blocks, and Bloom filters that skip files without the key. The index and the filters are cut into partitions of about 4 KB. A compaction replaces SSTables. It never edits them. See [SSTables](architecture/sstables.md).
 
 ### Level {#level}
 
@@ -154,6 +154,14 @@ A range tombstone, from `DeleteRange`, hides every older version of every key in
 ### Write stall {#write-stall}
 
 A write stall slows writes down, or stops them, when compaction falls behind the flushes. Without it, level 0 would grow without limit, and each read would search more files. At 20 level 0 files, writes slow down to `DelayedWriteRate`. At 36, they stop until compaction catches up. See [Write Stalls](operations/write-stalls.md).
+
+### Block cache {#block-cache}
+
+A block cache (`Cache`) holds the index and filter partitions of the SSTables, and evicts the least recently used. It puts a bound on the memory of the open tables, which otherwise grows with the data on disk. Several databases can share one. It holds no data blocks. See [Block Cache and Memtable Budget](guides/memory.md).
+
+### Memtable budget {#memtable-budget}
+
+A memtable budget (`WriteBufferManager`) caps the memtables of every database that shares it. Past the cap, the database that writes next flushes its own oldest memtable. It never stalls writes. See [Block Cache and Memtable Budget](guides/memory.md#the-memtable-budget).
 
 ### Checkpoint {#checkpoint}
 

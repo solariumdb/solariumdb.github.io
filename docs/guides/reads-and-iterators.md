@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # Reads and Iterators
 
-Reads in Solarium take no locks. Each write gets a **sequence number**, a counter that only grows. Each read sees the database at one sequence number, so it never sees part of a batch. This guide explains point reads, iterators, upper bounds, and how long an iterator keeps its snapshot.
+Reads in Solarium take no engine locks. Each write gets a **sequence number**, a counter that only grows. Each read sees the database at one sequence number, so it never sees part of a batch. This guide explains point reads, iterators, upper bounds, and how long an iterator keeps its snapshot.
 
 ## Point reads
 
@@ -22,6 +22,14 @@ byte[]?[] values = db.MultiGet(keys, users);
 ```
 
 The result has one entry for each key, in the same order. To read keys of several column families, call `MultiGet` once for each column family.
+
+`MultiGet` costs less than one `Get` for each key. It finds the data block of every key first, and then reads the distinct blocks together, in one batch read of the storage environment. Keys often share a block. On io_uring, the reads that miss the page cache are in flight together. See [Read Path](../architecture/read-path.md#multiget).
+
+With a [block cache](memory.md), `ReadOptions.FillCache` decides whether a read caches the index and filter partitions that it reads again. Set it to false for a read of rows that you will not read again:
+
+```csharp
+byte[]? value = db.Get("user:42"u8, users, new ReadOptions { FillCache = false });
+```
 
 ## Snapshots
 

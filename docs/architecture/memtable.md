@@ -29,7 +29,7 @@ In a group of several writers, the leader tells each writer that still spins to 
 
 ## Memory
 
-The memtable is on the managed heap. Its size counts the keys and values, plus 32 bytes for each entry, plus the fragments of its range tombstones. When the size reaches `WriteBufferSize`, the memtable becomes immutable at the next write group.
+The memtable is on the managed heap. Its size counts the keys and values, plus 32 bytes for each entry, plus the fragments of its range tombstones. When the size reaches `WriteBufferSize`, the memtable becomes immutable at the next write group. A `WriteBufferManager` counts the same size, across databases. After the inserts of each group, the leader of the stage charges the bytes that the group added, once for each group and not for each entry.
 
 A memtable that copied its keys and values into chunks on the pinned object heap, as the arena of RocksDB does, was tested. It made `Put` 4% to 9% faster under the workstation GC, and up to 12% slower under the server GC. The memtable does not use such an arena.
 

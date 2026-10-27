@@ -54,6 +54,7 @@ So the current WAL file is flushed before the manifest save. No record before th
 ## When writes wait for a flush
 
 - When a column family holds `MaxWriteBufferNumber` memtables, a memtable switch waits for a flush.
+- When the memtables of the databases that share a `WriteBufferManager` pass its cap, the database that writes next switches and flushes its column family with the oldest data. See [The memtable budget](../guides/memory.md#the-memtable-budget).
 - When the live WAL files are larger than `MaxTotalWalSize`, the column families that keep the oldest WAL file alive are flushed. This stops a column family with few writes from keeping old WAL files forever.
 
 ## The WAL file after a flush

@@ -40,9 +40,9 @@ The namespace is `Solarium`.
 
 | Member | Description | RocksDB equivalent |
 | --- | --- | --- |
-| `byte[]? Get(ReadOnlySpan<byte> key, ColumnFamily? family = null)` | The newest value of the key, or null when the key is absent or deleted. The array belongs to the caller. | `Get` |
-| `byte[]?[] MultiGet(IReadOnlyList<byte[]> keys, ColumnFamily? family = null)` | Looks up several keys of one column family at one snapshot. | `MultiGet` |
-| `Iterator NewIterator(ColumnFamily? family = null, ReadOptions? options = null)` | Creates an iterator over a snapshot of the column family. The caller disposes it. | `NewIterator`, with `iterate_upper_bound` |
+| `byte[]? Get(ReadOnlySpan<byte> key, ColumnFamily? family = null, ReadOptions? options = null)` | The newest value of the key, or null when the key is absent or deleted. The array belongs to the caller. | `Get`. Of the read options, only `fill_cache` applies. |
+| `byte[]?[] MultiGet(IReadOnlyList<byte[]> keys, ColumnFamily? family = null, ReadOptions? options = null)` | Looks up several keys of one column family at one snapshot. It reads the data blocks of its keys together, through `IStorageEnvironment.MultiRead`. | `MultiGet`. Of the read options, only `fill_cache` applies. |
+| `Iterator NewIterator(ColumnFamily? family = null, ReadOptions? options = null)` | Creates an iterator over a snapshot of the column family. The caller disposes it. | `NewIterator`, with `iterate_upper_bound` and `fill_cache` |
 | `long LatestSequenceNumber` | The sequence number of the newest write that reads can see. | `GetLatestSequenceNumber` |
 
 ### Maintenance
@@ -103,11 +103,13 @@ The seek methods throw `ObjectDisposedException` after `Dispose`.
 | Type | Members |
 | --- | --- |
 | `WriteOptions` | `bool Sync`. Static instances: `WriteOptions.Default` (not synced) and `WriteOptions.Synced`. |
-| `ReadOptions` | `byte[]? IterateUpperBound`. Static instance: `ReadOptions.Default`. |
+| `ReadOptions` | `byte[]? IterateUpperBound`, `bool FillCache`. Static instance: `ReadOptions.Default`. |
 | `DbOptions` | The options of the database. See [Options](options.md). |
 | `ColumnFamilyOptions` | The options of one column family. See [Options](options.md). |
 | `CompressionType` | `None` (0) or `Lz4` (1). |
 | `RateLimiter` | Paces flush and compaction writes, for `DbOptions.RateLimiter`. See [Options](options.md#ratelimiter). |
+| `Cache` | An LRU cache for index and filter blocks, for `ColumnFamilyOptions.BlockCache`. See [Options](options.md#cache). |
+| `WriteBufferManager` | A cap on the memtables of every database that shares it, for `DbOptions.WriteBufferManager`. See [Options](options.md#writebuffermanager). |
 
 ## LiveFileMetaData
 
@@ -142,5 +144,6 @@ The namespace is `Solarium.Storage`.
 | --- | --- |
 | `IStorageEnvironment` | Where the file I/O of the engine goes. See [Storage Environments](../architecture/storage-environments.md). |
 | `IStorageFile` | One open file: positional reads and writes, flush, the start of a writeback (`SyncRange`), length. |
+| `ReadRequest` | One read of an `IStorageEnvironment.MultiRead` batch: a file, a buffer, an offset, and the `BytesRead` that the environment sets. |
 | `DefaultStorageEnvironment` | The default storage environment, on `RandomAccess`. `DefaultStorageEnvironment.Instance` is the shared instance. |
 | `Solarium.IoUring.IoUringStorageEnvironment` | The io_uring storage environment for Linux, in the `Solarium.IoUring` package. See [io_uring on Linux](../guides/io-uring.md). |

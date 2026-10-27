@@ -121,7 +121,7 @@ The engines:
 
 The datasets: `small` has 200,000 keys of 256 bytes. `large` has 2,000,000 keys of 1 KiB, about 2 GB of values. `history` has 10,000 keys of 256 bytes written 8 times each.
 
-Selected results, in operations per second (or seconds), with LZ4 compression and leveled compaction, the current design:
+Selected results from 2026-10-24, in operations per second (or seconds), with LZ4 compression and leveled compaction. These runs came before the block cache, so every index and filter stayed in memory. The io_uring storage environment still read through the ring then. It now reads with `pread` on the calling thread, and its gets match the default environment (see [Storage Environments](../architecture/storage-environments.md#reads-on-the-calling-thread)):
 
 | Case | rocksdb | rocksdb-buffered | Solarium | Solarium, io_uring |
 | --- | ---: | ---: | ---: | ---: |
@@ -135,7 +135,7 @@ Selected results, in operations per second (or seconds), with LZ4 compression an
 
 What the results show:
 
-- **Reads need no block cache.** With its tables in the page cache, Solarium matched or beat RocksDB on gets and scans. On the default storage environment, it made 1.1 to 1.5 times the reads of `rocksdb-buffered`.
+- **Reads need no cache of data blocks.** With its tables in the page cache, Solarium matched or beat RocksDB on gets and scans. On the default storage environment, it made 1.1 to 1.5 times the reads of `rocksdb-buffered`.
 - **The defaults of Kahuna lose on reads that miss the block cache.** With direct reads, every block that misses the 256 MiB block cache comes from the drive.
 - **The store is the size of the RocksDB store.** Kahuna writes each value twice, in two rows that sort next to each other. LZ4 stores the second copy in a few bytes, as Snappy does in RocksDB. In the run that added LZ4, before leveled compaction, the store settled at 2.4 to 2.5 GB on every engine. Without compression, the Solarium store was 4.2 GB.
 - **Checkpoints link.** A plain checkpoint of `large` takes 0.10 s and writes 7 MiB, against 0.03 s for RocksDB.
@@ -248,8 +248,65 @@ What the results show:
 - **A fixed rate gives synced writes their drive back.** With 8 threads and a limiter of 25 or 50 MiB/s, the synced batches came back to the rate of one thread. In the `large` cases, `store b64` ran 2.5 to 3 times as fast as one thread or eight with no limiter, as fast as `rocksdb-buffered`. `store b1024` matched RocksDB. The load ran 1.2 times as fast as one thread, and wrote 0.7 times the bytes for each row while it ran.
 - **The work moves to the drain.** At 50 MiB/s, the merges that the load left behind took 70 to 82 seconds after it. One thread took 6 seconds, and RocksDB, which paces nothing by default, took 18.
 - **`BytesPerSync` alone helps a little:** 5% with 8 threads.
-- **Auto-tuning collapsed here.** When no write waits, an auto-tuned limiter drops to a twentieth of its rate, as in RocksDB. It climbs back by 5% every 10 seconds at the default period. After the drain, the rate fell to about 3 MiB/s, level 0 grew past the slowdown trigger, and the synced batches waited for the stall. An auto-tuned limiter suits a high rate that only smooths bursts. It does not protect synced writes.
+- **Auto-tuning collapsed here.** When no write waits, an auto-tuned limiter drops to a twentieth of its rate, as in RocksDB. It climbs back by 5% every 10 seconds at the default period. After the drain, the rate fell to about 3 MiB/s, level 0 grew past the slowdown trigger, and the synced batches waited for the stall. An auto-tuned limiter suits a high rate that only smooths bursts. In these runs, it did not protect synced writes. These runs came before a fix to how an auto-tuned limiter counts the time that writes waited. Before the fix, steady demand could read as half idle, so the rate stayed low. The auto-tuned case was not measured again after the fix.
 - **The rate depends on the drive.** 25 to 50 MiB/s is about a third to a half of what this drive commits in synced writes. A faster drive needs a higher rate. Too low a rate lets level 0 grow until writes stall.
+
+## Index and filter blocks in a cache
+
+A scratch program measured `Get` on fully compacted stores of two Kahuna shapes, with and without LZ4:
+
+- `small`: 1,000,000 rows, 24-byte keys, 256-byte values;
+- `large`: 500,000 rows, 1 KB values.
+
+The stores were on tmpfs, so every read came from memory, as from the page cache. Each case ran 5 seconds of `Get` on random written keys, from 1 and from 16 threads, on an i7-13620H (16 threads), on 2026-10-26.
+
+### Before partitions
+
+First, the index became one array of keys instead of one array for each key. The heap that opening the store adds, as a share of the table bytes:
+
+| Shape | Before | After |
+| --- | --- | --- |
+| Kommander, 31-byte keys, 256-byte values | 2.34%, 4.70% with LZ4 | 1.69%, 3.40% |
+| Kahuna `small` | 2.22%, 4.29% | 1.55%, 3.01% |
+| Kahuna `large` | 1.88%, 3.64% | 1.23%, 2.38% |
+
+`Get`, in thousands per second. "Resident" keeps the index and filter in the table. The cache columns hold every index and filter, pinned at level 0, or a quarter of them:
+
+| Shape | Threads | Resident, before | Resident | Cache holds all | Cache of a quarter |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `small` | 1 | 521 | 543 | 543 | 1.4 |
+| `small` | 16 | 5,200 | 5,368 | 4,983 | 5.8 |
+| `small` LZ4 | 1 | 464 | 463 | 471 | 0.6 |
+| `small` LZ4 | 16 | 4,759 | 4,788 | 4,310 | 2.7 |
+| `large` | 1 | 504 | 505 | 500 | 1.8 |
+| `large` | 16 | 2,820 | 2,757 | 3,634 | 3.2 |
+| `large` LZ4 | 1 | 469 | 466 | 472 | 0.9 |
+| `large` LZ4 | 16 | 4,189 | 4,304 | 4,045 | 3.3 |
+
+- The compact index changed no read. The two resident columns are within the noise of each other.
+- A cache that holds everything cost nothing from one thread, and 6% to 10% from 16 threads on three of the shapes, where each lookup takes the lock of a shard. The `large` case without compression ran low from 16 threads in both builds, so its gain is noise.
+- A cache smaller than the indexes and filters thrashed. A lookup on a table whose entry was not cached read and decoded the whole index and filter of the table, about 1 MB for a 64 MB table. The entry was larger than a shard, so it was evicted as it went in. Lookups ran 300 to 700 times slower, with hundreds of gen 2 collections.
+- A scan was the same in every case, because an iterator keeps the index of each table.
+
+### With partitions
+
+The same runs after the index and filter became partitions of about 4 KB under a top-level index (table version 4), with the stores written again:
+
+| Shape | Threads | Resident | Cache holds all | Cache of a quarter |
+| --- | --- | ---: | ---: | ---: |
+| `small` | 1 | 540 | 528 | 212 |
+| `small` | 16 | 5,127 | 4,921 | 244 |
+| `small` LZ4 | 1 | 473 | 460 | 208 |
+| `small` LZ4 | 16 | 4,830 | 4,478 | 263 |
+| `large` | 1 | 541 | 503 | 218 |
+| `large` | 16 | 3,185 | 3,404 | 313 |
+| `large` LZ4 | 1 | 489 | 464 | 213 |
+| `large` LZ4 | 16 | 4,394 | 4,068 | 289 |
+
+- **A miss now reads one partition**, a few kilobytes. A cache of a quarter of the partitions made lookups from one thread about 2.5 times slower than a cache that holds them all, where it made them hundreds of times slower before.
+- **From 16 threads, a small cache still costs a lot**: 11 to 20 times slower. The misses allocate their decoded partitions, about 2 seconds of the 5 were garbage collection pauses, and a cache of 1 MB has only two shards.
+- **A cache that holds every partition** read 2% to 5% slower than resident partitions from one thread, and up to 7% from 16, within the noise of the `large` case.
+- **Memory.** The heap that opening adds is the same as before partitions, within the noise (4.43 MB for `small` against 4.19 MB). A table whose partitions are cached keeps 0.04% of its bytes: the top-level index.
 
 ## Summary
 
@@ -258,8 +315,9 @@ What the results show:
 | Synced writes | The same as RocksDB. The drive is the limit. |
 | Unsynced writes | 1.0 to 1.6 times RocksDB on the default storage environment. |
 | Tail latency | The same as RocksDB up to about 100 MB/s for each node. GC pauses past that. |
-| Reads from the page cache | The same as or faster than RocksDB, with no block cache. |
+| Reads from the page cache | The same as or faster than RocksDB, with the index and filter in memory. |
+| Index and filter in a block cache | 2% to 7% slower than in memory, when the cache holds them all. About 2.5 times slower from one thread with a quarter of them. |
 | Store size | The same as RocksDB with LZ4. |
 | Heavy random writes | More rows per second than RocksDB. With one compaction thread, level 0 grows deeper; with 6, writes do not stall. |
 | Synced writes on a large store | Slower with more than one compaction thread and no limiter. With 8 threads and a limiter of 50 MiB/s, as fast as one thread or faster, but the merges take longer after a load. |
-| io_uring | Slower for unsynced writes and reads. The same for synced writes. |
+| io_uring | Slower for unsynced writes. The same for synced writes and for reads. 2.5 times the default environment for `MultiGet` from the drive, from one thread. |

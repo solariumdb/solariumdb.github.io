@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # Read Path
 
-A read in Solarium takes no locks. It takes the current version of the column family and a snapshot, and then searches the sources of the version from the newest to the oldest. This page explains why that gives a correct answer, and how readers keep files alive.
+A read in Solarium takes no engine locks. It takes the current version of the column family and a snapshot, and then searches the sources of the version from the newest to the oldest. This page explains why that gives a correct answer, and how readers keep files alive.
 
 ## Version, then snapshot
 
@@ -41,9 +41,27 @@ Within one column family, for each key, every version of the key in a newer sour
 
 In each source, the read skips versions and range tombstones above its snapshot.
 
-## Bloom filters
+## Index partitions and Bloom filters
 
-Each SSTable has a Bloom filter on its user keys: 10 bits for each key and 7 probes, which gives about 1% false positives. A read checks the filter before it reads a data block. A key that is not in the table usually costs no block read. The filters stay in memory while the table is open.
+Each SSTable cuts its index into partitions of about 4 KB of index entries. Each partition has a Bloom filter on the user keys of its data blocks: 10 bits for each key and 7 probes, which gives about 1% false positives. A small top-level index holds the last key of each partition.
+
+A lookup in a table takes three steps:
+
+1. It searches the top-level index for the partition whose last key is at or after its key.
+2. It checks the filter of that partition. A key that is not in the table usually stops here, with no block read.
+3. It searches the index of the partition for the data block, and reads the block.
+
+Without a block cache, the partitions stay in memory while the table is open. With `CacheIndexAndFilterBlocks`, they are in the block cache (see [Caches](#caches)).
+
+## MultiGet
+
+`MultiGet` reads in rounds, as the batched `MultiGet` of RocksDB, over batches of up to 32 keys:
+
+1. A round searches the sources of each key from where it stopped. It stops when a memtable answers, or when a table index names the data block that would hold the key.
+2. It reads the distinct blocks of the round, which keys often share, in one `IStorageEnvironment.MultiRead`.
+3. It settles each key that its block has a version of. A key whose block has none, after a false positive of a Bloom filter, goes on to the next source in the next round.
+
+Most calls take one round. On io_uring, the reads that the page cache misses are in flight together, so the drive serves them at once. See [Storage Environments](storage-environments.md#batch-reads).
 
 ## Iterators
 
@@ -62,10 +80,19 @@ A reader counts itself into the version that it reads, and out when it is done. 
 - A file that left the manifest is deleted when the last version that lists it closes. That can happen on the thread of the last reader.
 - The counts are kept for each CPU. Readers on different CPUs do not share a cache line, so they do not slow each other down.
 
-The read takes no lock. It reads the current version with a volatile read, counts itself in with an atomic operation, and checks that the version is still current. If a new version replaced it in that time, the read counts itself out and tries again.
+The read takes no lock to get its version. It reads the current version with a volatile read, counts itself in with an atomic operation, and checks that the version is still current. If a new version replaced it in that time, the read counts itself out and tries again.
 
-## No block cache
+## Caches
 
-Solarium has no block cache. Each block that a read needs is read from the file through the storage environment, and the page cache of the operating system is the only cache. A compressed block is decompressed on each read.
+**Data blocks** are never cached in the process. Each data block that a read needs is read from the file through the storage environment, and the page cache of the operating system is the only cache. A compressed block is decompressed on each read. In the Kahuna benchmarks, with the tables in the page cache, reads matched or beat RocksDB with its block cache. See [Benchmarks](../operations/benchmarks.md).
 
-In the Kahuna benchmarks, with the tables in the page cache, reads matched or beat RocksDB with its block cache. See [Benchmarks](../operations/benchmarks.md).
+**Index and filter partitions** go to the block cache of the column family with `CacheIndexAndFilterBlocks`:
+
+- A table puts every partition in the cache when it opens, and keeps only its top-level index.
+- A lookup takes its partition from the cache, under the lock of one shard.
+- After an eviction, a lookup reads the two blocks of the partition again from the file, verifies them, and caches them, unless `ReadOptions.FillCache` is false.
+- A reader that took a partition keeps it after an eviction. The blocks of a table never change, and the garbage collector frees them after the last reader. So a read holds no reference in the cache.
+- With `PinL0FilterAndIndexBlocksInCache`, a level 0 table pins its partitions until a move takes it out of level 0.
+- A table that closes erases its partitions. So a cache that several databases share holds only open tables.
+
+See [Block Cache and Memtable Budget](../guides/memory.md).

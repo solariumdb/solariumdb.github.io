@@ -94,7 +94,7 @@ const fitCards = [
     title: 'Not the target (yet)',
     items: [
       'A database server with a network protocol',
-      'Workloads that need a shared block cache or memory budget',
+      'Workloads that need a cache of data blocks in the process',
       'Fast synced writes beside heavy compactions, without a rate limit tuned to your drive',
       'Production use without your own testing: Solarium is a young database',
     ],

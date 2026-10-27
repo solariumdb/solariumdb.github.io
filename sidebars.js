@@ -16,6 +16,7 @@ const sidebars = {
         'guides/reads-and-iterators',
         'guides/range-deletes',
         'guides/flushes-and-compaction',
+        'guides/memory',
         'guides/checkpoints',
         'guides/io-uring',
       ],

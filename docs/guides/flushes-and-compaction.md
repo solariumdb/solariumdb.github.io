@@ -101,7 +101,7 @@ The costs:
 
 - **The work moves to after the burst.** At 50 MiB/s, the merges that the load left behind took 70 to 82 seconds after it, against 6 seconds with one thread and no limiter.
 - **The rate depends on the drive.** On the benchmark drive, 25 to 50 MiB/s is a third to a half of what the drive commits in synced writes. A faster drive needs a higher rate. Too low a rate lets level 0 grow until writes stall.
-- **Auto-tuning does not protect synced writes.** `new RateLimiter(rate, autoTuned: true)` starts at half its rate and moves between a twentieth of it and all of it. When no write waits, it drops to the bottom, and it climbs back by 5% every 10 seconds. In the benchmark, it fell to about 3 MiB/s, level 0 passed the slowdown trigger, and synced writes waited for the stall. Use auto-tuning only with a high rate, to smooth bursts.
+- **Auto-tuning does not protect synced writes.** `new RateLimiter(rate, autoTuned: true)` starts at half its rate and moves between a twentieth of it and all of it. When no write waits, it drops to the bottom, and it climbs back by 5% every 10 seconds. In the benchmark, it fell to about 3 MiB/s, level 0 passed the slowdown trigger, and synced writes waited for the stall. That run came before a fix to how the limiter counts the time that writes waited, and was not measured again. Use auto-tuning only with a high rate, to smooth bursts.
 
 `Solarium.Kahuna` sets no limiter, because the rate depends on the drive, and the configuration of Kahuna has no setting for it.
 
@@ -131,7 +131,7 @@ new ColumnFamilyOptions { Compression = CompressionType.Lz4 }
 
 `Compression` sets how flushes and compactions store the data blocks of new SSTables. The default is `None`. The only codec is `Lz4`. A block that LZ4 makes smaller by less than one eighth is stored raw.
 
-Old SSTables keep their own compression, so you can change the option between opens. There is no block cache, so each read of a compressed block decompresses it. In the Kahuna benchmarks, LZ4 made the store 40% smaller and loads faster, with no measured cost on reads.
+Old SSTables keep their own compression, so you can change the option between opens. Data blocks are never cached in the process, so each read of a compressed block decompresses it. In the Kahuna benchmarks, LZ4 made the store 40% smaller and loads faster, with no measured cost on reads.
 
 ## What you can watch
 
