@@ -73,9 +73,18 @@ div.markdown a {
   box-shadow: none;
 }
 
-html[data-theme='dark'] .navbar {
+/*
+ * A backdrop-filter makes the navbar the containing block of the fixed mobile sidebar,
+ * which clips the sidebar to the height of the navbar. Keep the blur off while the sidebar is open.
+ */
+html[data-theme='dark'] .navbar:not(.navbar-sidebar--show) {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+/* The mobile sidebar is opaque, so the page does not show through it. */
+html[data-theme='dark'] .navbar-sidebar {
+  --ifm-navbar-background-color: #120d1a;
 }
 
 .navbar__title {
@@ -206,6 +215,9 @@ html.plugin-pages[data-theme='light'] .navbar {
   border-bottom-color: #2b2238;
   background-color: rgba(18, 13, 26, 0.86);
   color: #e6e1ef;
+}
+
+html.plugin-pages[data-theme='light'] .navbar:not(.navbar-sidebar--show) {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
@@ -214,4 +226,13 @@ html.plugin-pages[data-theme='light'] .navbar__title,
 html.plugin-pages[data-theme='light'] .navbar__toggle,
 html.plugin-pages[data-theme='light'] .navbar [class*='colorModeToggle'] button {
   color: #e6e1ef;
+}
+
+/* The mobile sidebar of the homepage is dark too, so its light text stays legible. */
+html.plugin-pages[data-theme='light'] .navbar-sidebar {
+  --ifm-navbar-background-color: #120d1a;
+  --ifm-menu-color: #c3bad2;
+  --ifm-menu-color-background-active: rgba(62, 230, 176, 0.08);
+  --ifm-menu-color-background-hover: rgba(166, 75, 246, 0.10);
+  --ifm-navbar-shadow: 0 1px 0 #2b2238;
 }
