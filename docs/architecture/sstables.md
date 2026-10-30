@@ -74,4 +74,4 @@ When a table opens, it reads and verifies every partition. It keeps in memory:
 
 Each index is decoded into a few arrays: one of the last keys laid end to end, one of where each key starts, and one each of the sequence numbers, offsets, and sizes. So an index is five objects, whatever its number of blocks. One array for each key made a long-lived object for every 4 KB of data.
 
-`rocksdb.estimate-table-readers-mem` reports these bytes. The data blocks are read from the file on each read, through the page cache of the operating system.
+`rocksdb.estimate-table-readers-mem` reports these bytes. The data blocks are read from the file on each read, through the page cache of the operating system, unless `CacheDataBlocks` keeps them in the block cache.

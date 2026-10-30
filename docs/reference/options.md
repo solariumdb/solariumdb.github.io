@@ -44,9 +44,11 @@ The options of one column family.
 | `MaxBytesForLevelMultiplier` | 10 | How many times the target of a level is the target of the level above it. A finite number above 1. | `max_bytes_for_level_multiplier` |
 | `DisableAutoCompactions` | `false` | No compaction starts on its own. `CompactRange` still compacts, and the level 0 file count slows and stops no writes. | `disable_auto_compactions` |
 | `Compression` | `None` | How new SSTables store their data blocks: `None` or `Lz4`. Old tables keep their own compression. | `compression`. The default of RocksDB is Snappy. |
-| `BlockCache` | `null` | The cache for the index and filter blocks of the SSTables, with `CacheIndexAndFilterBlocks`. Several column families and databases can share one. Data blocks are never cached. See [Cache](#cache). | `BlockBasedTableOptions::block_cache` |
+| `BlockCache` | `null` | The cache for the blocks of the SSTables: the index and filter blocks with `CacheIndexAndFilterBlocks`, and the data blocks with `CacheDataBlocks`. Several column families and databases can share one. See [Cache](#cache). | `BlockBasedTableOptions::block_cache` |
+| `CacheDataBlocks` | `false` | Keeps the data blocks that reads take in `BlockCache`, verified and decompressed. Compactions never fill it. Needs a `BlockCache`. See [Cache data blocks](../guides/memory.md#cache-data-blocks). | None. RocksDB caches data blocks whenever it has a block cache. |
 | `CacheIndexAndFilterBlocks` | `false` | Keeps the index and filter partitions of each SSTable in `BlockCache`, not in the memory of the table. Needs a `BlockCache`. | `cache_index_and_filter_blocks` |
 | `PinL0FilterAndIndexBlocksInCache` | `false` | Pins the index and filter partitions of level 0 tables in `BlockCache` while they are in level 0. Only with `CacheIndexAndFilterBlocks`. | `pin_l0_filter_and_index_blocks_in_cache` |
+| `CacheIndexAndFilterBlocksWithHighPriority` | `true` | Puts the index and filter partitions in the high-priority pool of `BlockCache`, so the cache evicts data blocks read once before them. Only with `CacheIndexAndFilterBlocks`. | `cache_index_and_filter_blocks_with_high_priority` |
 
 The slowdown and stop triggers do not apply when `DisableAutoCompactions` is set.
 
@@ -61,7 +63,7 @@ RocksDB corrects some values with a warning in its log. Solarium has no log, so 
 | A stop trigger below the slowdown trigger | Throws | Raises it to the slowdown trigger |
 | `DelayedWriteRate` below 1 | Throws | Takes 0 as 16 MiB/s |
 | `MaxWriteBufferNumber` below 2 | Throws | Raises it to 2 |
-| `CacheIndexAndFilterBlocks` without a `BlockCache` | Throws | Gives the table factory an 8 MB cache of its own |
+| `CacheIndexAndFilterBlocks` or `CacheDataBlocks` without a `BlockCache` | Throws | Gives the table factory a cache of its own, 32 MiB in current releases |
 
 `MaxWriteBatchGroupSizeBytes` or `MaxBackgroundCompactions` below 1, or a negative `BytesPerSync` or `DbWriteBufferSize`, also throws.
 
@@ -87,7 +89,7 @@ RateLimiter limiter = new(bytesPerSecond: 50L * 1024 * 1024);
 
 ## Cache
 
-A class in the namespace `Solarium`, as the `NewLRUCache` of RocksDB with `strict_capacity_limit = false`. It holds the index and filter blocks of SSTables and, through a `WriteBufferManager` created with it, the memory of memtables. [Block Cache and Memtable Budget](../guides/memory.md) explains how to size it.
+A class in the namespace `Solarium`, as the `NewLRUCache` of RocksDB with `strict_capacity_limit = false`. It holds the index and filter blocks of SSTables, the data blocks with `CacheDataBlocks`, and, through a `WriteBufferManager` created with it, the memory of memtables. [Block Cache and Memtable Budget](../guides/memory.md) explains how to size it.
 
 ```csharp
 Cache cache = new(capacity: 512L * 1024 * 1024);
@@ -95,7 +97,8 @@ Cache cache = new(capacity: 512L * 1024 * 1024);
 
 | Member | Description | RocksDB equivalent |
 | --- | --- | --- |
-| `Cache(long capacity, int shardBits = -1)` | A cache of `capacity` bytes in 2^`shardBits` shards. -1 picks the count of RocksDB: as many shards as keep each at 512 KiB or more, up to 64. A negative capacity, or `shardBits` below -1 or above 20, throws `ArgumentOutOfRangeException`. | `NewLRUCache(capacity, num_shard_bits)` |
+| `Cache(long capacity, int shardBits = -1, double highPriorityPoolRatio = 0.5)` | A cache of `capacity` bytes in 2^`shardBits` shards. -1 picks the count of RocksDB: as many shards as keep each at 512 KiB or more, up to 64. `highPriorityPoolRatio` is the share of each shard that the high-priority pool can hold. 0 makes the cache one plain LRU list. A negative capacity, `shardBits` below -1 or above 20, or a ratio outside 0 to 1 throws `ArgumentOutOfRangeException`. | `NewLRUCache(capacity, num_shard_bits, false, high_pri_pool_ratio)` |
+| `double HighPriorityPoolRatio` | The share of each shard that the high-priority pool can hold. | `high_pri_pool_ratio` |
 | `long Capacity` | The capacity in bytes. | `GetCapacity` |
 | `void SetCapacity(long capacity)` | Changes the capacity. A smaller one evicts at once. | `SetCapacity` |
 | `long Usage` | The bytes of the cached entries, pinned ones included. | `GetUsage` |
@@ -103,6 +106,8 @@ Cache cache = new(capacity: 512L * 1024 * 1024);
 | `int ShardCount` | The number of shards. | |
 
 The capacity is soft. When only pinned entries are left, the cache stays over its capacity instead of failing a read.
+
+The high-priority pool holds the index and filter partitions and each entry read again after its insert. An eviction takes the other entries first. See [The high-priority pool](../guides/memory.md#the-high-priority-pool).
 
 ## WriteBufferManager
 
@@ -135,7 +140,7 @@ WriteBufferManager memtables = new(bufferSize: 256L * 1024 * 1024, cache);
 | Option | Default | Description |
 | --- | --- | --- |
 | `IterateUpperBound` | `null` | An iterator stops before the first key at or after this key. Null: no bound. |
-| `FillCache` | `true` | When false, a partition of an index and filter that the `BlockCache` evicted is read for this read only, and not cached again. Without a cache, it changes nothing. |
+| `FillCache` | `true` | When false, a block that is not in the `BlockCache` is read for this read only, and not cached. This applies to data blocks with `CacheDataBlocks`, and to index and filter partitions that the cache evicted. Without a cache, it changes nothing. |
 
 `ReadOptions.Default` is a shared instance.
 

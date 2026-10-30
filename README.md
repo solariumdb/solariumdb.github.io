@@ -1,6 +1,6 @@
 # Solarium Documentation
 
-This repository contains the Docusaurus documentation site for [Solarium](https://github.com/andresgutierrez/solarium), an embedded key-value store for .NET with the API and semantics of RocksDB.
+This repository contains the Docusaurus documentation site for [Solarium](https://github.com/solariumdb/solariumdb), an embedded key-value store for .NET with the API and semantics of RocksDB.
 
 ## Development
 

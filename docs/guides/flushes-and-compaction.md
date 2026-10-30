@@ -69,7 +69,7 @@ using SolariumDb db = SolariumDb.Open("./data", new DbOptions { MaxBackgroundCom
 
 Two compactions never read the same file, never compact level 0 of one column family at the same time, and never write overlapping files into one level. So, for each key, the versions in a level stay newer than those in the levels below, as with one thread.
 
-More threads have a cost. In the compaction benchmark with random keys, 6 threads kept level 0 at 22 files against 32, and writes never stalled. But compaction wrote 5.06 times the bytes of the data, against 4.28 with one thread. The threads also write at the same time, and they take the drive from synced writes. On a store of gigabytes, synced batches slowed to about a third. A [rate limiter](#pace-background-writes) gives the drive back. See [Benchmarks](../operations/benchmarks.md#concurrent-compactions).
+More threads have a cost. In the compaction benchmark with random keys, 6 threads wrote 1.8 times the rows per second of RocksDB, and writes stalled for 0.5 s. But compaction wrote 4.63 times the bytes of the data. The threads also write at the same time, and on a slow drive they take it from synced writes. On a drive whose synced writes took 4 to 8 ms, 8 threads with no limiter made synced batches slower than one thread did. A [rate limiter](#pace-background-writes) gives the drive back. On a drive whose synced writes took about 1 ms, 8 threads with no limiter were faster than one. See [Benchmarks](../operations/benchmarks.md#concurrent-compactions).
 
 `SolariumWAL`, the Kommander WAL, runs 6 compactions on 16 CPUs by default. `Solarium.Kahuna` keeps one, so that its synced writes stay fast.
 
@@ -95,15 +95,20 @@ How it works:
 - The WAL, the manifest, checkpoints, and the flushes of the WAL replay at open are not paced.
 - One limiter can pace several databases on one drive. Pass the same instance to each `DbOptions`. `SetBytesPerSecond` changes the rate while the databases run.
 
-In the synced benchmark with 8 compaction threads, a limiter of 25 or 50 MiB/s brought synced batches back to the rate of one thread. On the large Kahuna store, 8 threads at 50 MiB/s loaded 1.2 times as fast as one thread. Synced batches of 64 rows ran 2.5 times as fast. See [Paced background writes](../operations/benchmarks.md#paced-background-writes).
+The limiter paces flushes too. So choose a rate between two limits:
+
+- **Above what the store ingests.** Flushes must keep up with the writes. Below that rate, each memtable switch waits for a flush, and writes slow down.
+- **Below what the drive can write beside the WAL syncs.** Above that rate, the table writes take the drive from synced writes again.
+
+The benchmarks show both sides. On a drive whose synced writes took 4 to 8 ms, the synced batches wrote 11,000 to 13,000 rows per second. There, a limiter of 50 MiB/s brought 8 compaction threads back to the rate of one thread, and made the synced batches of 64 rows of Kahuna 2.5 to 3 times as fast. On the same drive at about 1 ms for each synced write, the batches wrote 50 to 65 MB/s. A limiter of 25 or 50 MiB/s was then below the ingest: every memtable switch waited for a flush, and the batches slowed to 0.2 to 0.4 times their rate with no limiter. See [Paced background writes](../operations/benchmarks.md#paced-background-writes).
 
 The costs:
 
-- **The work moves to after the burst.** At 50 MiB/s, the merges that the load left behind took 70 to 82 seconds after it, against 6 seconds with one thread and no limiter.
-- **The rate depends on the drive.** On the benchmark drive, 25 to 50 MiB/s is a third to a half of what the drive commits in synced writes. A faster drive needs a higher rate. Too low a rate lets level 0 grow until writes stall.
+- **The work moves to after the burst.** The merges that a load leaves behind run after it, at the rate of the limiter.
+- **The rate depends on the drive and on the ingest.** Measure both before you choose. Too low a rate makes flushes fall behind, and lets level 0 grow until writes stall.
 - **Auto-tuning does not protect synced writes.** `new RateLimiter(rate, autoTuned: true)` starts at half its rate and moves between a twentieth of it and all of it. When no write waits, it drops to the bottom, and it climbs back by 5% every 10 seconds. In the benchmark, it fell to about 3 MiB/s, level 0 passed the slowdown trigger, and synced writes waited for the stall. That run came before a fix to how the limiter counts the time that writes waited, and was not measured again. Use auto-tuning only with a high rate, to smooth bursts.
 
-`Solarium.Kahuna` sets no limiter, because the rate depends on the drive, and the configuration of Kahuna has no setting for it.
+`Solarium.Kahuna` sets a limiter only when you give it a rate with `--storage-compaction-rate-mbps`. See [Solarium.Kahuna](../integrations/kahuna.md#pace-the-compactions).
 
 ## Manual compaction
 
@@ -131,7 +136,7 @@ new ColumnFamilyOptions { Compression = CompressionType.Lz4 }
 
 `Compression` sets how flushes and compactions store the data blocks of new SSTables. The default is `None`. The only codec is `Lz4`. A block that LZ4 makes smaller by less than one eighth is stored raw.
 
-Old SSTables keep their own compression, so you can change the option between opens. Data blocks are never cached in the process, so each read of a compressed block decompresses it. In the Kahuna benchmarks, LZ4 made the store 40% smaller and loads faster, with no measured cost on reads.
+Old SSTables keep their own compression, so you can change the option between opens. Without `CacheDataBlocks`, data blocks are not cached in the process, so each read of a compressed block decompresses it. In the Kahuna benchmarks, LZ4 made the store 40% smaller and loads faster, with no measured cost on reads.
 
 ## What you can watch
 

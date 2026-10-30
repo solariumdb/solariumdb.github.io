@@ -19,11 +19,14 @@ flowchart LR
     W --> D2[(SolariumDb: the Raft log)]
 ```
 
-It needs Kahuna 1.14.2 or later:
+The package is `SolariumDb.Kahuna`. Its assembly and its namespace are `Solarium.Kahuna`.
+
+It needs Kahuna 1.14.4 or later:
 
 - 1.13.4 brought the public storage contract: `IPersistenceBackend` with immutable rows, and the `StorageProviders` registry of `IPersistenceBackendProvider` and `IWalProvider`.
 - 1.14.1 brought the storage settings that pace the compactions.
 - 1.14.2 brought the memory that the WAL and the store share.
+- 1.14.4 brought the `--extension-option` settings, and the `System.IO.Hashing` version that Solarium uses.
 
 ## Load it into a Kahuna server
 
@@ -41,6 +44,27 @@ The published folder holds only what the server does not have: the Solarium asse
 
 Every node of a cluster loads the same artifact. The server logs the SHA-256 of each file and the engines that it registered.
 
+## Choose the storage environment
+
+By default, the WAL and the store use the default [storage environment](../architecture/storage-environments.md), which works on every platform. On Linux, `--extension-option solarium.environment=io_uring` puts both on the [io_uring storage environment](../guides/io-uring.md):
+
+```shell
+kahuna-server --extension-assembly /opt/kahuna/solarium/Solarium.Kahuna.dll \
+              --storage solarium --wal-storage solarium \
+              --extension-option solarium.environment=io_uring
+```
+
+| Value | Storage environment |
+| --- | --- |
+| `default`, or no setting | The default storage environment. |
+| `io_uring` | One `IoUringStorageEnvironment` for every Solarium database of the process. It lives as long as the process. It needs Linux with io_uring. |
+
+Choose io_uring when lookups often miss the page cache. Its batched reads (`MultiGet`, which `GetKeyValues` uses) keep those misses in flight together. From the drive, they read 1.6 to 2.4 times as many keys. It costs 3% to 5% on batched reads that hit the page cache. Its writes go through one reactor thread, so they slow down when readers keep every CPU busy. See [Storage Environments](../architecture/storage-environments.md).
+
+The setting changes how the files are read and written, not what they hold. So you can change it between restarts.
+
+A misspelled setting stops the node. A `solarium.` key other than `solarium.environment`, or a value other than `default` and `io_uring`, fails the open with a message that names it. On a machine that cannot create an io_uring ring, `io_uring` fails the open too.
+
 ## Pace the compactions
 
 Two storage settings of Kahuna pace the compactions of the store:
@@ -52,7 +76,7 @@ Two storage settings of Kahuna pace the compactions of the store:
 
 With neither, the store runs one compaction at a time and paces nothing.
 
-Choose a rate of about a third to half of what the disk commits in synced writes. On a disk that commits about 100 MB/s, a rate of 50 made the synced batches of 64 rows 2.5 times as fast as one compaction with no pacing, and loads 1.2 times as fast. See [Paced background writes](../operations/benchmarks.md#paced-background-writes). Too low a rate lets level 0 grow until writes slow down.
+The limiter paces flushes too. So its rate must stay above what the store ingests, and below what leaves the disk free for the WAL syncs. On a disk whose synced writes took 4 to 8 ms, a rate of 50 made the synced batches of 64 rows 2.5 times as fast as one compaction with no pacing. On the same disk at about 1 ms for each synced write, the synced batches wrote more than 25 and 50 MB/s. The flushes then held them to 0.2 to 0.4 times their rate with no pacing. See [Pace background writes](../guides/flushes-and-compaction.md#pace-background-writes). Too low a rate lets level 0 grow until writes slow down.
 
 ## Share memory between the WAL and the store
 
@@ -66,6 +90,8 @@ Two settings give the WAL and the store of a node memory to share. Both provider
 Both are 0 by default. A Solarium WAL beside another store, or a Solarium store beside another WAL, uses them alone.
 
 Size the memtable budget above 256 MiB, two of the 128 MiB shard memtables of the WAL. Below that, the WAL warns at open, because a smaller budget flushes the memtables of the WAL before they fill.
+
+Neither budget is on the managed heap, as with RocksDB. The memtables are in native arenas, and the cached data blocks of `CacheDataBlocks` are native memory. So a node sized for RocksDB needs no larger heap limit for the GC (`DOTNET_GCHeapHardLimit`) on Solarium. What stays on the managed heap is the index and filter partitions in the cache, about 2% of the table bytes and 4% with LZ4. The process holds at most the memtable budget for memtables, plus one partly used chunk of 64 KiB for each processor and memtable.
 
 ```mermaid
 flowchart LR
@@ -88,7 +114,7 @@ options.StorageProviders.Register(new SolariumPersistenceBackendProvider());
 options.StorageProviders.Register(new SolariumWalProvider());
 ```
 
-Both providers take an `IStorageEnvironment`. The constructors with no parameters, which the extension loader calls, use the default storage environment.
+An embedded node gives the extension options in `EmbeddedKahunaOptions.ExtensionOptions`. A provider that you construct with an `IStorageEnvironment` uses that one, whatever the settings of the node. `OpenAt` and `MergeCheckpointInto`, which Kahuna calls for backups and restores, use the default storage environment, unless the provider has one from its constructor.
 
 ## What it keeps from the RocksDB backend
 
@@ -105,10 +131,10 @@ Both providers take an `IStorageEnvironment`. The constructors with no parameter
 
 ## Differences from the RocksDB backend
 
-- **An index and filter cache, not a block cache.** Without `--storage-shared-cache-mb`, the tables of the store keep their index and filter blocks in a 256 MiB cache that every Solarium store of the process shares, pinned at level 0. The RocksDB backend keeps them in its process-wide 256 MiB block cache. The cache holds no data blocks: the page cache of the operating system serves them. 256 MiB holds the indexes and filters of about 12 GB of tables, or 6 GB with LZ4. Past that, a lookup that misses reads one partition of the index and filter of its table again, a few kilobytes. With a cache of a quarter of them, lookups from one thread ran about 2.5 times slower. Tables written before partitions keep one whole index and filter until a compaction rewrites them, and a miss on one of them reads all of it.
+- **An index and filter cache, not a block cache.** Without `--storage-shared-cache-mb`, the tables of the store keep their index and filter blocks in a 256 MiB cache that every Solarium store of the process shares, pinned at level 0. The RocksDB backend keeps them in its process-wide 256 MiB block cache. The cache holds no data blocks: the backend does not set `CacheDataBlocks`, and the page cache of the operating system serves them. 256 MiB holds the indexes and filters of about 12 GB of tables, or 6 GB with LZ4. Past that, a lookup that misses reads one partition of the index and filter of its table again, a few kilobytes. With a cache of a quarter of them, lookups from one thread ran about 2.5 times slower. Tables written before partitions keep one whole index and filter until a compaction rewrites them, and a miss on one of them reads all of it.
 - **No RocksDB tuning.** Direct reads, Bloom filter settings, statistics, and `--rocksdb-shared-memory` do not apply. The shared cache and memtable budget above do. The tables of Solarium have a fixed 10-bit Bloom filter. The `kv` column family keeps a 64 MiB memtable with up to three. The `locks` column family keeps 8 MiB with up to two. These are the sizes of the RocksDB backend.
 - **Checkpoints hold no WAL.** A checkpoint is `SolariumDb.CreateCheckpoint`. Its tables are hard links to those of the store, as in RocksDB, or copies when the checkpoint is on another file system. What the memtables hold goes to tables of the copy, so the live store is not flushed. A live checkpoint is staged on the file system of the store, as in the RocksDB backend (`StagesLiveCheckpointsInStore` is true).
-- **LZ4, and one compaction thread unless paced.** Both column families compress their tables with LZ4. The RocksDB backend uses Snappy, the default of RocksDB. Solarium compacts into the levels of RocksDB, sized as RocksDB sizes them. Without `--storage-compaction-rate-mbps`, it runs one compaction at a time, where the RocksDB backend runs `max(2, CPUs / 2)`. With no pacing, several compactions take the drive from synced writes, and slow them to about a third on a store of gigabytes.
+- **LZ4, and one compaction thread unless paced.** Both column families compress their tables with LZ4. The RocksDB backend uses Snappy, the default of RocksDB. Solarium compacts into the levels of RocksDB, sized as RocksDB sizes them. Without `--storage-compaction-rate-mbps`, it runs one compaction at a time, where the RocksDB backend runs `max(2, CPUs / 2)`. With no pacing, several compactions take the disk from synced writes and slow them.
 - **The trim is not rate limited.** The `RateLimiter` of Solarium paces flush and compaction writes only. `BackupCaptureThrottleBytesPerSec` also counts the reads of the trim (`kAllIo` in RocksDB). So the backend does not apply it to the as-of trim of a checkpoint copy.
 - **The purge flushes first.** The `CompactRange` of Solarium does not flush a memtable first. So the trim and the merge flush each column family before they compact it.
 - **Batched reads read one column family for each call.** The `MultiGet` of Solarium reads one column family for each call. Every batched read here reads the `kv` column family only.
@@ -123,10 +149,11 @@ Raise the reference only to a Kahuna release that the servers that load it alrea
 
 The [Kahuna benchmarks](../operations/benchmarks.md#the-persistence-backend-of-kahuna-against-rocksdb) compare both backends. In summary:
 
-- With its tables in the page cache, Solarium matched or beat RocksDB on gets and scans. Those runs, from 2026-10-24, came before the store put its index and filter blocks in a cache.
-- With LZ4, the store is the same size as that of RocksDB.
-- Several compaction threads slow synced writes on a large store, because they take the drive. That is why the backend keeps one compaction thread unless you set `--storage-compaction-rate-mbps`. With 8 threads and a rate limiter of 50 MiB/s, synced batches of 64 rows ran 2.5 times as fast as with one thread, but the merges took 78 seconds after a load, against 6.
-- A plain checkpoint takes about 0.1 s, because it links the tables.
+- With its tables in the page cache, Solarium made 1.05 to 1.8 times the gets and scans of RocksDB through the page cache on the `large` dataset, and 1.4 to 1.95 times on `history`. Misses on the small stores were slower, at 0.68 to 0.99 times.
+- Loads and synced batches ran 1.07 to 1.32 times as fast. Synced writes of one row are bound by the drive on every engine.
+- With less memory than the store, gets and scans were 1.2 to 1.8 times as fast, but writes were slower on the default storage environment.
+- With LZ4, the store is the same size as that of RocksDB. The compactions after a load wrote more bytes than those of RocksDB, so the store took longer to go quiet.
+- A plain checkpoint takes about 0.04 s, because it links the tables.
 
 ## Tests
 

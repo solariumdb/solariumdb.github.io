@@ -29,9 +29,19 @@ In a group of several writers, the leader tells each writer that still spins to 
 
 ## Memory
 
-The memtable is on the managed heap. Its size counts the keys and values, plus 32 bytes for each entry, plus the fragments of its range tombstones. When the size reaches `WriteBufferSize`, the memtable becomes immutable at the next write group. A `WriteBufferManager` counts the same size, across databases. After the inserts of each group, the leader of the stage charges the bytes that the group added, once for each group and not for each entry.
+The skip list lives in **native memory**, outside the managed heap, as the `InlineSkipList` of RocksDB lives in its arena:
 
-A memtable that copied its keys and values into chunks on the pinned object heap, as the arena of RocksDB does, was tested. It made `Put` 4% to 9% faster under the workstation GC, and up to 12% slower under the server GC. The memtable does not use such an arena.
+- Each node is one allocation. It holds a header (the sequence number, the lengths, the kind, and the height), then its links as addresses, then the key and the value. So a key compare reads the node that the search just reached.
+- An **arena** cuts the nodes from chunks of 64 KiB. While a group inserts at once, each writer uses a chunk of its own processor. A value larger than 16 KiB gets a block of its own.
+- A write copies its key and value in. A read copies them out into new arrays, as a read of an SSTable does.
+
+The garbage collector sees no entry. No collection copies or marks the memtable, and the memtable does not count against the heap limit of the GC.
+
+The size of a memtable counts its nodes: each key and value, a 24-byte header, and 8 bytes for each level of links, rounded up to 8. It also counts the fragments of its range tombstones. When the size reaches `WriteBufferSize`, the memtable becomes immutable at the next write group. A `WriteBufferManager` counts the same size, across databases. After the inserts of each group, the leader of the stage charges the bytes that the group added, once for each group and not for each entry.
+
+The chunks of a flushed memtable go back to a pool: that of the `WriteBufferManager`, or one that the databases without a manager share. The pool keeps them for the next memtables while the chunks that it holds stay within the memtable budget. So a new memtable writes to pages that are mapped already. Besides the budget, the process holds at most one partly used chunk for each processor and memtable.
+
+A memtable is freed when its last holder releases it. Every version that lists it holds it, and so does a flush that waits to write it. Every reader is counted in a version, so a reader, an iterator included, never sees its memory go. A database that closes refuses the readers that come after, with `ObjectDisposedException`. An iterator that is still open keeps its memtables until you dispose it.
 
 ## Range tombstones
 
@@ -66,7 +76,7 @@ A lookup searches each run with a binary search, and scans the fewer than 8 tomb
 
 The cost moves to the writer: each tombstone takes part in one build each time the count of tombstones doubles. The largest build, of all the tombstones, comes on the range delete that makes the count 8 times a power of two.
 
-In the benchmarks, a pair of one `DeleteRange` and one `Get` costs 4 to 9 µs at every tombstone count. With the RocksDB approach, it cost 2,006 µs at 8,192 tombstones.
+In the benchmarks, a pair of one `DeleteRange` and one `Get` or `Seek` costs 3 to 12 µs at every tombstone count. With the RocksDB approach, it cost 2 ms at 8,192 tombstones.
 
 ### Concurrent range deletes
 

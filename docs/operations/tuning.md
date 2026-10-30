@@ -10,10 +10,7 @@ The defaults of Solarium are the defaults of RocksDB, and they suit a general wo
 
 Each column family uses at most `WriteBufferSize × MaxWriteBufferNumber` bytes of memtables. With the defaults, that is 64 MB × 2 = 128 MB for each column family.
 
-The memtables are on the managed heap. So:
-
-- the .NET garbage collector sees them, and their size counts toward its budget;
-- a large memtable makes more work for gen 2 collections.
+The memtables are in native memory, outside the managed heap, as in RocksDB. So the .NET garbage collector does not copy or mark them, and they do not count against its heap limit (`DOTNET_GCHeapHardLimit`). A node sized for RocksDB needs no larger heap limit for Solarium. The cached data blocks of `CacheDataBlocks` are native memory too. The index and filter partitions in the block cache stay on the managed heap.
 
 For many column families, lower `WriteBufferSize` on the column families with few writes. Do not set it below a few megabytes, because each flush makes one level 0 file.
 
@@ -21,7 +18,7 @@ To cap the memtables of all the column families, or of several databases, use a 
 
 The open SSTables keep their index, Bloom filters, and range tombstones in memory: about 2% of the table bytes, and 4% with LZ4. `rocksdb.estimate-table-readers-mem` reports that size. It grows with the data on disk. To bound it, put the index and filter blocks in a block cache (`ColumnFamilyOptions.BlockCache` with `CacheIndexAndFilterBlocks`). Size the cache to hold them all. A smaller cache reads partitions again on its misses, and lookups slow down.
 
-The page cache of the operating system caches the data blocks. Solarium never caches them itself. See [Block Cache and Memtable Budget](../guides/memory.md).
+By default, the page cache of the operating system caches the data blocks. `CacheDataBlocks` keeps them in the block cache too. It made reads faster on a store that fits in the cache, and slower on a store ten times the cache. See [Cache data blocks](../guides/memory.md#cache-data-blocks).
 
 ## Write throughput
 
@@ -35,7 +32,7 @@ The page cache of the operating system caches the data blocks. Solarium never ca
 | Many writer threads | Group commit shares the WAL appends and flushes. | None. More writers usually means more throughput. |
 | Higher `MaxBackgroundCompactions` | Level 0 stays lower, and writes stall less. | More bytes written. On a large store, slower synced writes, unless a `RateLimiter` paces the compactions. |
 | A `RateLimiter` | Synced writes keep their share of the drive while flushes and compactions run. | The merges take longer after a burst. Too low a rate lets level 0 grow until writes stall. |
-| `BytesPerSync` | Each SSTable reaches the drive while it is written, not all at its last sync. | Little. In the benchmark, it made synced writes 1% to 5% faster. |
+| `BytesPerSync` | Each SSTable reaches the drive while it is written, not all at its last sync. | Little. In the benchmark, the rate of synced writes changed by -5% to +18%, within the spread of the compactions. |
 
 [Pace background writes](../guides/flushes-and-compaction.md#pace-background-writes) explains how to choose a rate for your drive.
 
@@ -44,7 +41,8 @@ The Kommander WAL uses this tuning for its shard column families: 128 MiB memtab
 ## Read latency
 
 - Keep the number of level 0 files low. Each level 0 file is one more source for each read.
-- Keep the data in the page cache when you can. Data blocks have no cache in the process, so a read of a block that is not in the page cache goes to the drive.
+- Keep the data in the page cache when you can. By default, data blocks have no cache in the process, so a read of a block that is not in the page cache goes to the drive.
+- When the data that your reads use fits in a block cache, try `CacheDataBlocks`. Measure it: on a store ten times the cache, it made reads slower.
 - With a block cache, size it to hold every index and filter partition, and pin level 0 with `PinL0FilterAndIndexBlocksInCache`.
 - Read many keys with `MultiGet`, not one `Get` for each key. It reads their data blocks in one batch.
 - Prefer `Next` to `Prev`. A `Prev` step searches every source.
@@ -66,10 +64,10 @@ Lower it when a restart must be fast. The open replays every live WAL file.
 
 ## Garbage collection
 
-The memtables of Solarium are on the managed heap, so the garbage collector works in proportion to what you write. In the Kommander WAL benchmark:
+The memtables are native memory, but the write path still allocates managed memory: 1.6 to 9.2 KB for each unsynced Kommander entry of 1 KiB or more. In the Kommander WAL benchmark, with four unsynced writers:
 
-- at the rates of a busy Raft node (up to about 100 MB/s for each node), the tail latency matched RocksDB;
-- past that rate, gen 2 collections paused the process for up to about 90 ms;
-- the server GC was 11% to 21% faster than the workstation GC on unsynced writes.
+- at 100 MB/s or less, collections paused the process for less than 1% of the time;
+- the p99.9 latency was about three times that of RocksDB, and below 0.25 ms;
+- the longest write took 13 to 26 ms, against 11 to 13 ms for RocksDB.
 
-Run a server with `<ServerGarbageCollector>true</ServerGarbageCollector>`. For a very high ingest, a larger gen 0 budget (for example `DOTNET_GCgen0size=0x10000000`) shortened the p99.9 latency, but not the total pause.
+Run a server with the server GC: set `<ServerGarbageCollection>true</ServerGarbageCollection>` in the project file. Under the workstation GC, collections took 20% to 29% of an unsynced `Put`, against 7% to 9% under the server GC. See [Benchmarks](benchmarks.md#tail-latency-at-a-fixed-rate).

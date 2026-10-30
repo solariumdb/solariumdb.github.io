@@ -80,8 +80,8 @@ An ordered cursor over one column family, at the snapshot taken when it was crea
 | Member | Description |
 | --- | --- |
 | `bool Valid()` | True when the iterator is on a key. |
-| `ReadOnlySpan<byte> Key()` | The current key. Throws `InvalidOperationException` when the iterator is not valid. |
-| `ReadOnlySpan<byte> Value()` | The current value. Throws `InvalidOperationException` when the iterator is not valid. |
+| `ReadOnlySpan<byte> Key()` | The current key, valid until the iterator moves. Throws `InvalidOperationException` when the iterator is not valid. |
+| `ReadOnlySpan<byte> Value()` | The current value, valid until the iterator moves. Throws `InvalidOperationException` when the iterator is not valid. |
 | `void SeekToFirst()` | Moves to the first key, or becomes invalid when there is none. |
 | `void Seek(ReadOnlySpan<byte> target)` | Moves to the first key at or after `target`. |
 | `void SeekToLast()` | Moves to the last key, or to the last key before the upper bound. |
@@ -108,7 +108,7 @@ The seek methods throw `ObjectDisposedException` after `Dispose`.
 | `ColumnFamilyOptions` | The options of one column family. See [Options](options.md). |
 | `CompressionType` | `None` (0) or `Lz4` (1). |
 | `RateLimiter` | Paces flush and compaction writes, for `DbOptions.RateLimiter`. See [Options](options.md#ratelimiter). |
-| `Cache` | An LRU cache for index and filter blocks, for `ColumnFamilyOptions.BlockCache`. See [Options](options.md#cache). |
+| `Cache` | An LRU cache for index and filter blocks, and for data blocks with `CacheDataBlocks`, for `ColumnFamilyOptions.BlockCache`. See [Options](options.md#cache). |
 | `WriteBufferManager` | A cap on the memtables of every database that shares it, for `DbOptions.WriteBufferManager`. See [Options](options.md#writebuffermanager). |
 
 ## LiveFileMetaData
@@ -146,4 +146,4 @@ The namespace is `Solarium.Storage`.
 | `IStorageFile` | One open file: positional reads and writes, flush, the start of a writeback (`SyncRange`), length. |
 | `ReadRequest` | One read of an `IStorageEnvironment.MultiRead` batch: a file, a buffer, an offset, and the `BytesRead` that the environment sets. |
 | `DefaultStorageEnvironment` | The default storage environment, on `RandomAccess`. `DefaultStorageEnvironment.Instance` is the shared instance. |
-| `Solarium.IoUring.IoUringStorageEnvironment` | The io_uring storage environment for Linux, in the `Solarium.IoUring` package. See [io_uring on Linux](../guides/io-uring.md). |
+| `Solarium.IoUring.IoUringStorageEnvironment` | The io_uring storage environment for Linux, in the `SolariumDb.IoUring` package. See [io_uring on Linux](../guides/io-uring.md). |

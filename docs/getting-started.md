@@ -13,36 +13,33 @@ This page takes you from an empty project to a database that holds data in two c
 
 ## Add Solarium to your project
 
-:::note Not on NuGet yet
-The Solarium packages are not published on NuGet yet. The package ID `Solarium` on nuget.org belongs to a different project. Do not install it. Reference the Solarium projects from a clone of the repository.
-:::
-
-Clone the repository next to your project:
+Add the store from NuGet:
 
 ```shell
-git clone https://github.com/andresgutierrez/solarium.git
-```
-
-Add a project reference to the store:
-
-```shell
-dotnet add reference ../solarium/src/Solarium/Solarium.csproj
+dotnet add package SolariumDb
 ```
 
 Add the other packages only if you need them:
 
 ```shell
 # The io_uring storage environment (Linux 6.1 or later)
-dotnet add reference ../solarium/src/Solarium.IoUring/Solarium.IoUring.csproj
+dotnet add package SolariumDb.IoUring
 
 # SolariumWAL, the Kommander WAL backend
-dotnet add reference ../solarium/src/Solarium.Kommander/Solarium.Kommander.csproj
+dotnet add package SolariumDb.Kommander
 ```
+
+The package IDs start with `SolariumDb`, because the ID `Solarium` on nuget.org belongs to a different project. Do not install it. The namespaces are `Solarium`, `Solarium.IoUring`, and `Solarium.Kommander`.
+
+:::note Docs follow the main branch
+These docs follow the main branch of the [repository](https://github.com/solariumdb/solariumdb). A feature can reach the main branch before it reaches NuGet. To use the newest code, clone the repository and reference the projects, for example `dotnet add reference ../solariumdb/src/Solarium/Solarium.csproj`.
+:::
 
 To build and test the repository itself:
 
 ```shell
-cd solarium
+git clone https://github.com/solariumdb/solariumdb.git
+cd solariumdb
 dotnet build
 dotnet test
 ```

@@ -157,7 +157,7 @@ A write stall slows writes down, or stops them, when compaction falls behind the
 
 ### Block cache {#block-cache}
 
-A block cache (`Cache`) holds the index and filter partitions of the SSTables, and evicts the least recently used. It puts a bound on the memory of the open tables, which otherwise grows with the data on disk. Several databases can share one. It holds no data blocks. See [Block Cache and Memtable Budget](guides/memory.md).
+A block cache (`Cache`) holds the index and filter partitions of the SSTables, and evicts the least recently used. It puts a bound on the memory of the open tables, which otherwise grows with the data on disk. Several databases can share one. With `CacheDataBlocks`, it also holds the data blocks that reads take. See [Block Cache and Memtable Budget](guides/memory.md).
 
 ### Memtable budget {#memtable-budget}
 
@@ -173,7 +173,7 @@ A storage environment does all the file I/O of the engine, like the `Env` of Roc
 
 ### io_uring {#io-uring}
 
-io_uring is the asynchronous I/O interface of the Linux kernel. The `Solarium.IoUring` package adds a storage environment on it, for Linux 6.1 or later. Today it is for measurement and experiments: the engine issues one I/O at a time, and on that pattern io_uring is slower than the default. See [io_uring on Linux](guides/io-uring.md).
+io_uring is the asynchronous I/O interface of the Linux kernel. The `SolariumDb.IoUring` package adds a storage environment on it, for Linux 6.1 or later. Today it is for measurement and experiments: the engine issues one I/O at a time, and on that pattern io_uring is slower than the default. See [io_uring on Linux](guides/io-uring.md).
 
 ## Related projects
 

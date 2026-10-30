@@ -6,7 +6,13 @@ sidebar_position: 1
 
 `Solarium.Kommander` is a [Kommander](https://kahunakv.github.io/kommander.github.io/) write-ahead log on Solarium. `SolariumWAL` implements the `IWAL` interface of Kommander. A host passes it to `RaftManager` in place of `RocksDbWAL`, with no change to Kommander and no native library to ship.
 
-It targets Kommander 1.11.3 and .NET 10. This is version 0.1.0, so the on-disk format can still change.
+It targets Kommander 1.12.0 and .NET 10. Install it from NuGet:
+
+```shell
+dotnet add package SolariumDb.Kommander
+```
+
+This is version 0.1.3, so the on-disk format can still change.
 
 ```mermaid
 flowchart LR
@@ -46,7 +52,7 @@ The constructor parameters:
 
 ### io_uring
 
-On Linux, the `Solarium.IoUring` package writes the files through io_uring. Pass the environment through the options. The host owns the environment, and disposes it after the WAL:
+On Linux, the `SolariumDb.IoUring` package writes the files through io_uring. Pass the environment through the options. The host owns the environment, and disposes it after the WAL:
 
 ```csharp
 using Solarium.IoUring;
@@ -78,6 +84,11 @@ Some terms in this list:
 
 - The **commit frontier** is the highest committed log id of a partition. A commit marker is a small metadata put, not a rewrite of the row.
 - The **compaction floor** is the log id below which the log is dead. The dead prefix is removed by the floor, a range delete in the active memtable, and whole-file drops with `DeleteFilesInRange`. See [Range Deletes](../guides/range-deletes.md#the-raft-log-pattern).
+
+`SolariumWAL` also fixes two bugs of `RocksDbWAL` at that commit. Kommander 1.12.0 made the same two fixes to `RocksDbWAL`. They are its only changes to `RocksDbWAL` since 1.11.3. So neither fix is a difference from the release that `SolariumWAL` targets:
+
+- **The header reader skips length-delimited fields correctly.** In the `RocksDbWAL` of 1.11.3, `ReadHeaderFromWire` and `ReadTermFromWire` skip a length-delimited field one byte short. Then a `Proposed` row with the log type `op` and a 32-byte payload reads with the first byte of the payload as its type, and the proposed-tail sweep can keep an uncommitted entry. `SolariumWAL` reads the length first, and refuses a length past the end of the row.
+- **The commit frontier never moves back under concurrent commits.** In the `RocksDbWAL` of 1.11.3, two commits of one partition that overlap can land in the opposite order. After a reopen, the commits that the higher advance absorbed read `Proposed`. `SolariumWAL` serializes the advances of each partition (see [Concurrency](#concurrency)).
 
 The rows and keys are the same bytes, but the files are those of Solarium. A `RocksDbWAL` directory does not open as a `SolariumWAL` directory, and the reverse is also true. To move a node from one to the other, copy the rows. This package does not do that for you.
 
@@ -157,8 +168,6 @@ Each open `SolariumWAL` reports one measurement for each gauge, without tags, as
 - **The engine gauges are on a second meter.** A host adds the `"Solarium.Kommander"` meter. A WAL without a block cache reports no block cache gauges.
 - **A write after `Dispose` throws** `ObjectDisposedException`, as a read does. `RocksDbWAL` reports it as a storage failure first and probes the volume of the closed WAL.
 - **A new WAL is one whose database holds nothing.** `RocksDbWAL` takes a WAL as new when its directory does not exist, and refuses an existing directory without a `version` key. So a directory that a host created first never opens, and neither does one that a crash left during the first open. `SolariumWAL` writes the version synced, before any row, and refuses only a database that holds data without a version.
-- **The header reader skips length-delimited fields correctly.** In `RocksDbWAL`, `ReadHeaderFromWire` and `ReadTermFromWire` skip a length-delimited field one byte short. Then a `Proposed` row with the log type `op` and a 32-byte payload reads with the first byte of the payload as its type, and the proposed-tail sweep can keep an uncommitted entry. `SolariumWAL` reads the length first, and refuses a length past the end of the row.
-- **The commit frontier never moves back under concurrent commits.** In `RocksDbWAL`, two commits of one partition that overlap can land in the opposite order. After a reopen, the commits that the higher advance absorbed read `Proposed`. `SolariumWAL` serializes the advances of each partition (see [Concurrency](#concurrency)).
 - **The WAL file after a flush.** Solarium starts a new WAL file at the first write after a flush, not at the flush. So a closed WAL keeps its last file until then.
 
 ## Tests

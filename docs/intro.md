@@ -9,7 +9,7 @@ Solarium is an embedded key-value store for .NET, written in managed code. Its d
 Solarium exists to be a durable log store for [Kommander](https://kahunakv.github.io/kommander.github.io/), the Raft library for .NET. It covers the part of RocksDB that the Raft log of Kommander uses, and RocksDB is the reference behavior. A host can plug Solarium into Kommander in place of RocksDB, with no native library.
 
 :::note A young database
-Solarium is a brand-new database, at version 0.1.0. Its on-disk format can still change. Read [What is not done yet](#what-is-not-done-yet) before you use it for data that you cannot lose.
+Solarium is a brand-new database, at version 0.1.3. Its on-disk format can still change. Read [What is not done yet](#what-is-not-done-yet) before you use it for data that you cannot lose.
 :::
 
 ## In simple terms
@@ -50,7 +50,7 @@ This design makes writes fast, because a write is one append and one insert in m
 | **Checkpoints** | A consistent copy of the database in a new directory, with hard links to the SSTables. |
 | **Group commit** | Writes from many threads share their WAL appends and flushes. |
 | **Lock-free reads** | Reads take no engine locks, on a lock-free skip-list memtable. |
-| **Block cache and memtable budget** | One cache for the index and filter blocks, and one cap on the memtables, shared by several databases if you want. |
+| **Block cache and memtable budget** | One cache for the index and filter blocks, and for the data blocks if you want, and one cap on the memtables. Several databases can share both. |
 | **Storage environments** | All file I/O goes through an interface. The default works everywhere. An io_uring storage environment is available for Linux. |
 
 Every member is safe to call from any thread.
@@ -59,12 +59,12 @@ Every member is safe to call from any thread.
 
 | Package | What it is |
 | --- | --- |
-| `Solarium` | The store. Pure managed code, on every platform that .NET 10 runs on. |
-| `Solarium.IoUring` | A storage environment for Linux 6.1 or later that does its file writes through io_uring, on the [ioxide](https://github.com/MDA2AV/ioxide) runtime. A `MultiGet` also sends the reads that the page cache misses to the ring together. |
-| `Solarium.Kommander` | `SolariumWAL`, a Kommander `IWAL` on Solarium, with the on-disk layout of the `RocksDbWAL` of Kommander. |
-| `Solarium.Kahuna` | A [Kahuna](https://kahunakv.github.io/) storage engine: the persistence backend and the Raft WAL on Solarium. A Kahuna server loads it with `--extension-assembly`. |
+| `SolariumDb` | The store. Managed code, on every platform that .NET 10 runs on. Its memtables and cached data blocks are native memory, outside the managed heap, as in RocksDB. |
+| `SolariumDb.IoUring` | A storage environment for Linux 6.1 or later that does its file writes through io_uring, on the [ioxide](https://github.com/MDA2AV/ioxide) runtime. A `MultiGet` also sends the reads that the page cache misses to the ring together. |
+| `SolariumDb.Kommander` | `SolariumWAL`, a Kommander `IWAL` on Solarium, with the on-disk layout of the `RocksDbWAL` of Kommander. |
+| `SolariumDb.Kahuna` | A [Kahuna](https://kahunakv.github.io/) storage engine: the persistence backend and the Raft WAL on Solarium. A Kahuna server loads it with `--extension-assembly`. |
 
-All four packages are MIT-licensed and at version 0.1.0.
+All four packages are on [NuGet](https://www.nuget.org/packages/SolariumDb) and MIT-licensed. The namespaces and the assemblies keep the names `Solarium`, `Solarium.IoUring`, `Solarium.Kommander`, and `Solarium.Kahuna`.
 
 ## A first look
 
@@ -100,15 +100,15 @@ db.DeleteRange("log:0000"u8, "log:0001"u8);
 - The embedded API, column families, atomic batches across them, `DeleteRange`, and iterators with an upper bound.
 - Group commit with pipelined writes, and lock-free reads on a skip-list memtable.
 - WAL recovery that cuts a torn tail and refuses damage to flushed data. Power-loss tests and kill tests check it.
-- Memtable flushes to SSTables, LZ4 block compression, WAL rotation with a size cap, the manifest, leveled compaction into the seven levels of RocksDB with its dynamic level sizing, up to `MaxBackgroundCompactions` compactions at once, a rate limiter and `BytesPerSync` for flushes and compactions, a memtable budget shared across databases (`WriteBufferManager`), a block cache that bounds the memory of the index and filter blocks and can hold the memtable budget too, `DeleteFilesInRange`, checkpoints, and write stalls.
+- Memtable flushes to SSTables, LZ4 block compression, WAL rotation with a size cap, the manifest, leveled compaction into the seven levels of RocksDB with its dynamic level sizing, up to `MaxBackgroundCompactions` compactions at once, a rate limiter and `BytesPerSync` for flushes and compactions, a memtable budget shared across databases (`WriteBufferManager`), a block cache that bounds the memory of the index and filter blocks, can hold the memtable budget too, and caches data blocks when you ask, `DeleteFilesInRange`, checkpoints, and write stalls.
 - The RocksDB properties and the live-file metadata that Kommander reads.
 - `Solarium.Kommander`. It passes the conformance suite of Kommander for WAL backends and the behavior tests of its RocksDB backend. It runs three-node Kommander clusters in the tests and publishes the engine `raft.wal.*` metrics.
-- `Solarium.Kahuna`, a port of the RocksDB persistence backend of Kahuna that passes its behavior tests.
+- `Solarium.Kahuna`, a port of the RocksDB persistence backend of Kahuna that passes its behavior tests. A Kahuna server loads its providers as an extension for `--storage solarium` and `--wal-storage solarium`.
 
 ## What is not done yet
 
 - **Recovery from an engine failure without a reopen.** After a WAL, flush, or compaction failure, the database refuses all writes until you open it again. `SolariumWAL` reopens it automatically.
-- **A cache for data blocks.** The block cache holds index and filter blocks only. The page cache of the operating system serves the data blocks.
+- **A cache for data blocks that pays on stores larger than the cache.** With the LRU cache, `CacheDataBlocks` made reads faster on a store that fits in the cache, but slower on a store ten times its size. So it is off by default, and the page cache of the operating system serves the data blocks.
 - **Subcompactions and more than one flush thread.** One merge always runs on one thread, as with `max_subcompactions` of 1 in RocksDB. Flushes have one thread.
 
 ## Where to go next

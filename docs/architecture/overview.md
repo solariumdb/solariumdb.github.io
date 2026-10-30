@@ -95,7 +95,7 @@ Reads take none of these locks. A block cache has a lock for each of its shards,
 The design follows RocksDB in each part: group commit with pipelined writes, the skip-list memtable, the `SuperVersion`, leveled compaction with dynamic level sizing, a rate limiter for flush and compaction writes, fragmented range tombstones, and the property names. The main differences are:
 
 - one thread for each merge (no subcompactions), and one flush thread;
-- a block cache for index and filter blocks only;
+- a block cache that holds data blocks only with `CacheDataBlocks`, off by default;
 - a WAL record with a durable offset;
 - a manifest that is written again whole on each change.
 

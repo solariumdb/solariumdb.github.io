@@ -18,7 +18,7 @@ A native storage engine is a closed box under a .NET service. You cannot change 
 | **Debugging and end-to-end profiling** | The whole path, from the write queue to the file, is C#. A .NET debugger steps into it, and a .NET profiler sees every frame, down to the lowest storage components. | Available |
 | **High-level observability** | The engine reports its state in its own terms: the files and levels of each column family, memtable sizes, pending flushes and compactions, and write stalls. See [Diagnostics](operations/diagnostics.md). | Available |
 | **Instrumentation as a first-class feature** | `SolariumWAL` publishes engine metrics on `System.Diagnostics.Metrics`. The engine also counts write groups, writer waits, and the time of each stage of a group commit. These detailed counters are internal for now, and only the benchmarks print them. | Partly available |
-| **Tighter integration with .NET** | Keys and values are `ReadOnlySpan<byte>`. Options are records. Memtables are on the managed heap, so the .NET memory tools see them. The metrics of `SolariumWAL` work with OpenTelemetry and `dotnet-counters`. | Available |
+| **Tighter integration with .NET** | Keys and values are `ReadOnlySpan<byte>`. Options are records. Memtables and cached data blocks are in native memory, as in RocksDB, so they add no work for the garbage collector. The metrics of `SolariumWAL` work with OpenTelemetry and `dotnet-counters`. | Available |
 
 ## What you get
 
@@ -59,16 +59,16 @@ Solarium is a good fit when:
 Solarium is not the right choice when:
 
 - you need a database server with a network protocol. Solarium is a library;
-- your workload needs a cache of data blocks in the process. The block cache of Solarium holds index and filter blocks only, and the page cache of the operating system serves the data blocks;
-- your workload needs fast synced writes beside heavy compactions on a large store, and you want the engine to find the pace on its own. Solarium paces compactions at a fixed rate that you choose for your drive, and its auto-tuned rate did not protect synced writes in the benchmark. See [Paced background writes](operations/benchmarks.md#paced-background-writes);
-- you cannot test it yourself before production. Solarium is a young database at version 0.1.0, it is not on NuGet yet, and its on-disk format can still change.
+- your store is much larger than memory and needs a cache of data blocks in the process. Solarium can cache data blocks (`CacheDataBlocks`), but on a store ten times the cache its LRU cache made reads slower than the page cache alone. See [Data blocks in a cache](operations/benchmarks.md#data-blocks-in-a-cache);
+- your workload needs fast synced writes beside heavy compactions on a large store, and you want the engine to find the pace on its own. Solarium paces flushes and compactions at a fixed rate that you choose for your drive and your ingest, and its auto-tuned rate did not protect synced writes in the benchmark. See [Paced background writes](operations/benchmarks.md#paced-background-writes);
+- you cannot test it yourself before production. Solarium is a young database at version 0.1.3, and its on-disk format can still change.
 
 ## How fast is it?
 
-The [Benchmarks](operations/benchmarks.md) page compares Solarium with RocksDB on the same workloads, on one machine: a 13th Gen Intel Core i7-13620H with 16 CPUs, Linux, and an NVMe drive. As the Kommander WAL:
+The [Benchmarks](operations/benchmarks.md) page compares Solarium with RocksDB on the same workloads, on one machine: a 13th Gen Intel Core i7-13620H with 16 CPUs, Linux 6.12, and an NVMe drive. As the Kommander WAL:
 
-- **Synced writes** are bound by the drive. Solarium reached 0.85 to 1.18 times the rate of the native engine.
-- **Unsynced writes** measure the CPU cost. Solarium on the default storage environment wrote 1.0 to 1.6 times as many entries.
-- **Tail latency** was the same at the rates of a busy Raft node. Past about 100 MB/s for each node, garbage collection pauses make the tail of Solarium longer.
+- **Synced writes** are bound by the drive. Solarium came out within 8% of RocksDB in most cases, and at 1.2 times for batches from 16 writers.
+- **Unsynced writes** measure the CPU cost. Solarium on the default storage environment wrote 1.5 to 2.8 times as many entries.
+- **Tail latency** is longer. With unsynced writers at 100 MB/s or less, the p99.9 latency of Solarium was about three times that of RocksDB, and below 0.25 ms.
 
-As the Kahuna storage engine, reads from the page cache were as fast or faster, with no cache of data blocks. On a large store, several compaction threads slow synced writes, unless a rate limiter paces them.
+As the Kahuna storage engine, with the tables in the page cache, gets and scans were 1.05 to 1.95 times as fast as RocksDB on the large and history datasets, with no cache of data blocks. Loads and synced batches were 1.07 to 1.32 times as fast. Misses on small stores were slower.

@@ -4,7 +4,7 @@ sidebar_position: 7
 
 # io_uring on Linux
 
-On Linux 6.1 or later, the `Solarium.IoUring` package lets the engine do its file writes through io_uring, the asynchronous I/O interface of the Linux kernel, on the [ioxide](https://github.com/MDA2AV/ioxide) runtime. Its clear gain is `MultiGet` from the drive: the reads that the page cache misses are in flight together. On the `large` Kahuna dataset under a memory limit, `MultiGet` read 2.5 times as many keys from one thread as on the default storage environment, and 1.6 times from eight. Other reads match the default storage environment, and unsynced writes are slower. Use it only when your own measurements show a gain.
+On Linux 6.1 or later, the `SolariumDb.IoUring` package lets the engine do its file writes through io_uring, the asynchronous I/O interface of the Linux kernel, on the [ioxide](https://github.com/MDA2AV/ioxide) runtime. Its clear gain is `MultiGet` from the drive: the reads that the page cache misses are in flight together. On the `large` Kahuna dataset under a memory limit, `MultiGet` read 2.5 times as many keys from one thread as on the default storage environment, and 1.6 times from eight. Other reads match the default storage environment, and unsynced writes are slower. Use it only when your own measurements show a gain.
 
 All file I/O in Solarium goes through a **storage environment**, as with the `Env` of RocksDB. The default storage environment works on every platform. `Solarium.IoUring` adds a second one.
 
@@ -42,16 +42,17 @@ A table read is one blocking read, usually from the page cache. Through the ring
 
 ## What io_uring costs
 
-Every write is a hand-off to the reactor thread, and the hand-off costs more than the system call that it replaces. Measured on Linux 6.1 with ext4 on an NVMe drive:
+Every write is a hand-off to the reactor thread, and the hand-off costs more than the system call that it replaces. Measured on Linux 6.12 with ext4 on an NVMe drive, on 2026-10-29:
 
 | Operation | Default | io_uring |
 | --- | ---: | ---: |
-| 4 KB write | 1.5 µs | 6.9 µs |
-| 64 KB write | 20 µs | 29 µs |
-| Unsynced `Put` from one thread | 3.0 µs | 6.9 µs |
-| Synced `Put` | the same | the same |
+| 4 KB read | 344 ns | 333 ns |
+| 4 KB write | 0.93 µs | 6.33 µs |
+| 64 KB write | 13.8 µs | 21.7 µs |
+| Unsynced `Put` from one thread | 934 ns | 5,988 ns |
+| Synced `Put` | within 4% | within 4% |
 
-On this kernel, io_uring cannot complete a buffered ext4 write inline. It passes the write to one of its worker threads (`iou-wrk`), and the extra cost grows with the size of the write. A synced `Put` costs the same in both environments, because the device flush takes milliseconds and neither environment sends it through the ring.
+On Linux 6.1, io_uring could not complete a buffered ext4 write inline. It passes the write to one of its worker threads (`iou-wrk`), and the extra cost grows with the size of the write. A synced `Put` costs the same in both environments, because the device flush takes milliseconds and neither environment sends it through the ring.
 
 Reads on the calling thread have a cost too. Where readers keep every CPU busy, a write waits for the reactor thread to get a CPU. With six readers in a tight loop beside one writer on four CPUs, the writer flushed about a fifth of the tables that it flushed on the default environment.
 

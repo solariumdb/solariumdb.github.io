@@ -42,10 +42,10 @@ The host owns an environment, and disposes it after every database that uses it 
 
 ## Why io_uring is not faster here
 
-The engine issues one write at a time. Every write in the io_uring storage environment is a hand-off to the reactor thread, and the hand-off costs more than the system call that it replaces. Measured on Linux 6.1 with ext4 on an NVMe drive:
+The engine issues one write at a time. Every write in the io_uring storage environment is a hand-off to the reactor thread, and the hand-off costs more than the system call that it replaces. Measured with ext4 on an NVMe drive:
 
-- A 4 KB read from the page cache took 2.6 µs through the ring instead of 0.4 µs with `pread`. The kernel completes it inline, so the extra cost is the hand-off alone, about 2.3 µs.
-- A 4 KB write takes 6.9 µs instead of 1.5 µs, and a 64 KB write 29 µs instead of 20 µs. On this kernel, io_uring cannot complete a buffered ext4 write inline. It passes the write to one of its worker threads (`iou-wrk`), and the extra cost grows with the size of the write.
+- On Linux 6.1, a 4 KB read from the page cache took 2.6 µs through the ring instead of 0.4 µs with `pread`. The kernel completes it inline, so the extra cost is the hand-off alone, about 2.3 µs.
+- A 4 KB write takes 6.33 µs instead of 0.93 µs, and a 64 KB write 21.7 µs instead of 13.8 µs, on Linux 6.12 on 2026-10-29. On Linux 6.1, io_uring could not complete a buffered ext4 write inline. It passes the write to one of its worker threads (`iou-wrk`), and the extra cost grows with the size of the write.
 - A synced `Put` costs the same in both environments, because the device flush takes milliseconds and neither environment sends it through the ring.
 
 io_uring can only win when many operations are in flight at once.

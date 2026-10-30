@@ -73,7 +73,7 @@ const config = {
             label: 'Docs',
           },
           {
-            href: 'https://github.com/andresgutierrez/solarium',
+            href: 'https://github.com/solariumdb/solariumdb',
             label: 'GitHub',
             position: 'right',
           },
@@ -117,7 +117,7 @@ const config = {
             items: [
               {
                 label: 'GitHub',
-                href: 'https://github.com/andresgutierrez/solarium',
+                href: 'https://github.com/solariumdb/solariumdb',
               },
               {
                 label: 'Kommander',

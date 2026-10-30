@@ -84,7 +84,16 @@ The read takes no lock to get its version. It reads the current version with a v
 
 ## Caches
 
-**Data blocks** are never cached in the process. Each data block that a read needs is read from the file through the storage environment, and the page cache of the operating system is the only cache. A compressed block is decompressed on each read. In the Kahuna benchmarks, with the tables in the page cache, reads matched or beat RocksDB with its block cache. See [Benchmarks](../operations/benchmarks.md).
+**Data blocks** go to the block cache of the column family only with `CacheDataBlocks`, which is off by default. Without it, each data block that a read needs is read from the file through the storage environment, and the page cache of the operating system is the only cache. A compressed block is decompressed on each read. In the Kahuna benchmarks, with the tables in the page cache, reads matched or beat RocksDB with its block cache. See [Benchmarks](../operations/benchmarks.md).
+
+With `CacheDataBlocks`:
+
+- A read looks up the block in the cache, keyed by the owner number of the database, the number of the table, and the offset of the block. A cached block makes no system call and decompresses nothing.
+- A miss reads, verifies, and decompresses the block, then caches it in native memory, unless `ReadOptions.FillCache` is false.
+- A read holds a reference to the cached block from its lookup to the end of its decode. An eviction leaves the bytes to the last reader, which frees them. So a read never sees the memory of its block go.
+- `Get`, iterators, and the rounds of `MultiGet` use the cache. In a `MultiGet` round, a cached block settles its keys without joining the `MultiRead` of the round.
+- Compactions read with `FillCache` off, so their inputs do not push out the blocks of the readers.
+- The data blocks of a retired table stay until the LRU evicts them. A database that closes erases every entry under its owner number.
 
 **Index and filter partitions** go to the block cache of the column family with `CacheIndexAndFilterBlocks`:
 
@@ -94,5 +103,7 @@ The read takes no lock to get its version. It reads the current version with a v
 - A reader that took a partition keeps it after an eviction. The blocks of a table never change, and the garbage collector frees them after the last reader. So a read holds no reference in the cache.
 - With `PinL0FilterAndIndexBlocksInCache`, a level 0 table pins its partitions until a move takes it out of level 0.
 - A table that closes erases its partitions. So a cache that several databases share holds only open tables.
+
+Each shard of the cache keeps a high-priority pool, up to `HighPriorityPoolRatio` of the shard, for the index and filter partitions and each entry read again after its insert. Another pool holds the rest. An entry that overflows the high-priority pool moves to the newest end of the other pool, so the two keep one LRU order. An eviction takes from the low-priority pool first. So the blocks of a scan, each read once, do not push out the indexes or the blocks read often.
 
 See [Block Cache and Memtable Budget](../guides/memory.md).

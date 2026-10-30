@@ -74,6 +74,6 @@ The keys are copies that belong to you.
 
 ## Memory figures differ from RocksDB
 
-- `cur-size-all-mem-tables` counts the keys and values of each memtable, plus 32 bytes for each entry, and the fragments of its range tombstones. An empty memtable is 0. RocksDB counts the arena blocks that it allocated, 2 KB for an empty memtable.
+- `cur-size-all-mem-tables` counts the nodes of each memtable in its native arena: each key and value, a 24-byte header, and 8 bytes for each skip-list level, rounded up to 8. It also counts the range tombstones and their fragments. An empty memtable is 0. RocksDB counts the arena blocks that it allocated, 2 KB for an empty memtable. The arena also holds at most one partly used chunk of 64 KiB for each processor that wrote to the memtable.
 - `estimate-table-readers-mem` counts the index keys and handles, the filter bits, and the range tombstones and their fragments of each open table. It does not count allocations.
 - `block-cache-capacity`, `block-cache-usage`, and `block-cache-pinned-usage` return null for a column family without a `BlockCache`, as in RocksDB with no block cache.

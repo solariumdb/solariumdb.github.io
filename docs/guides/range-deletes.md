@@ -32,7 +32,7 @@ db.Write(new WriteBatch()
 - An end key before the begin key throws `ArgumentException` when you add it to the batch.
 - A put of a key in the range after the range delete is visible again, because it is newer than the tombstone.
 
-Range tombstones cost reads very little. Each read checks the tombstones that can cover its key, and Solarium indexes them so that the check stays fast with thousands of tombstones. On the benchmark machine (a 13th Gen Intel Core i7-13620H on Linux), a `Get` in a memtable with 8,192 tombstones took 0.23 µs, against 0.20 µs with none. [Memtable](../architecture/memtable.md) explains the index.
+Range tombstones cost reads very little. Each read checks the tombstones that can cover its key, and Solarium indexes them so that the check stays fast with thousands of tombstones. On the benchmark machine (a 13th Gen Intel Core i7-13620H on Linux), a `Get` in a memtable with 8,192 tombstones took 204 ns, against 164 ns with none. [Memtable](../architecture/memtable.md) explains the index.
 
 ## DeleteFilesInRange
 

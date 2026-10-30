@@ -25,7 +25,7 @@ The result has one entry for each key, in the same order. To read keys of severa
 
 `MultiGet` costs less than one `Get` for each key. It finds the data block of every key first, and then reads the distinct blocks together, in one batch read of the storage environment. Keys often share a block. On io_uring, the reads that miss the page cache are in flight together. See [Read Path](../architecture/read-path.md#multiget).
 
-With a [block cache](memory.md), `ReadOptions.FillCache` decides whether a read caches the index and filter partitions that it reads again. Set it to false for a read of rows that you will not read again:
+With a [block cache](memory.md), `ReadOptions.FillCache` decides whether a read caches the blocks that it reads from the file: the data blocks with `CacheDataBlocks`, and the index and filter partitions that the cache evicted. Set it to false for a read of rows that you will not read again:
 
 ```csharp
 byte[]? value = db.Get("user:42"u8, users, new ReadOptions { FillCache = false });
@@ -63,10 +63,19 @@ for (iterator.SeekToFirst(); iterator.Valid(); iterator.Next())
 | `Next()` | Moves to the next key. |
 | `Prev()` | Moves to the previous key. |
 | `Valid()` | True when the iterator is on a key. |
-| `Key()`, `Value()` | The current key and value. They throw `InvalidOperationException` when the iterator is not valid. |
+| `Key()`, `Value()` | The current key and value, valid until the iterator moves. They throw `InvalidOperationException` when the iterator is not valid. |
 | `Dispose()` | Releases the snapshot and its SSTables. Later calls do nothing. |
 
 Keys sort by their bytes, as unsigned values. Each position is the newest version of a key at or below the snapshot. Deleted keys and keys under a range tombstone do not show.
+
+The spans from `Key()` and `Value()` are valid only until the next `Seek`, `Next`, `Prev`, or `Dispose`, as in RocksDB. The iterator copies each position into buffers that it reuses, so `Next` allocates nothing. To keep a key or a value after the iterator moves, copy it:
+
+```csharp
+List<byte[]> keys = new();
+
+for (iterator.SeekToFirst(); iterator.Valid(); iterator.Next())
+    keys.Add(iterator.Key().ToArray());
+```
 
 ## Upper bounds
 
