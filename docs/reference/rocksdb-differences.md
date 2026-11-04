@@ -25,6 +25,9 @@ Solarium covers the part of RocksDB that the Raft log of Kommander and the backe
 - **The manifest** is written again whole on each change. RocksDB appends edits to a log.
 - **A data block** stores each key whole, after 17 bytes of lengths, sequence number, and kind. RocksDB stores only the part of a key that differs from the key before it, with varint lengths.
 - **The index and filter are always partitioned**, as with `index_type = kTwoLevelIndexSearch` and `partition_filters`, which RocksDB writes only when asked. Each partition holds about 4 KB of index entries (`metadata_block_size`), with a filter on the user keys of its blocks, under a top-level index. A table written before partitions has one partition, its whole index and filter, until a compaction rewrites it.
+- **A block checksum** is a CRC-32 with the context checksum modifier of RocksDB (`format_version` 6) mixed in: the table id folded to 32 bits, XOR the sum of the halves of the block offset. The checksum of RocksDB is CRC32c or XXH3, and its base is a value for each file in its footer.
+- **The manifest records each table id.** An open compares the id, the size, the entry count, the sequence numbers, and the key range with the table file. RocksDB compares a table unique id with its manifest (`verify_sst_unique_id_in_manifest`), and its file size.
+- **A read checks each data block against its index entries**, by its first and last keys. RocksDB does not. So a misplaced block is corruption also in a table without context checksums.
 - **The WAL file** has its own header and a version, not the 32 KB blocks of RocksDB. Each WAL record carries the offset of the file that a flush made durable. Recovery uses it to tell power-loss damage from damage to flushed data. The WAL of RocksDB has no such field, so its recovery modes either fail the open after such a power loss or drop data after any damage.
 
 ## Compression and caching

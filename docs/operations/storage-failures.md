@@ -37,6 +37,17 @@ Nothing that was acknowledged is lost. Synced writes were flushed, and unsynced 
 
 While the volume still refuses writes, every write reports `Errored`, and Kommander retries on its own cadence. The counter `raft.wal.engine_reopens_total` counts the reopens, tagged `success` or `failed`. See [Solarium.Kommander](../integrations/kommander.md#after-a-storage-failure).
 
+## Corruption {#corruption}
+
+Corruption is damage in a table, the WAL, or the manifest that no crash explains. It throws `SolariumException` with `IsCorruption` set:
+
+| `IsCorruption` | Cause | What to do |
+| --- | --- | --- |
+| False | A failure of the storage, such as a full disk | Fix the cause and open the database again. |
+| True | Damage to the files | A retry fails the same way, and a reopen does not repair the files. Take the data from another copy, for example a checkpoint or another node. |
+
+A read that finds corruption fails, and other keys still read. A compaction that finds it stops writes, as any compaction failure does. The exception of the refused write has `IsCorruption` set too, so it still reports the damage. See [Damage to an SSTable](durability.md#damage-to-an-sstable).
+
 ## Dispose after a failure
 
 `Dispose` flushes the current WAL file. If that flush fails, the database closes anyway, and `Dispose` throws `SolariumException`. Then the writes since the last synced write may not survive a power loss.

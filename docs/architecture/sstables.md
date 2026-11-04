@@ -19,20 +19,21 @@ It holds, in this order:
 | Index and filter partitions | For each run of data blocks, a filter block and an index block. The index holds the last internal key of each data block, with its offset and size. The filter is a Bloom filter on the user keys of those blocks: 10 bits for each key and 7 probes, about 1% false positives. |
 | Properties block | The entry count, the lowest and highest sequence numbers, and the smallest and largest keys. |
 | Top-level index | The last internal key of each partition, with the handles of its index and its filter. |
-| Footer | The handles of the other blocks, the format version, a checksum, and a magic number. |
+| Footer | The table id, the handles of the other blocks, the format version, a checksum, and a magic number. |
 
-Every block and the footer carry a CRC-32.
+Every block and the footer carry a checksum, based on a CRC-32.
 
 ## The layout
 
-All integers are little-endian. A block handle is an offset and a size, and it covers the payload and the CRC-32 of the block.
+All integers are little-endian. A block handle is an offset and a size, and it covers the payload and the checksum of the block.
 
 ```text
 [data block]... [range tombstone block] ([filter partition] [index partition])... [properties block]
 [top-level index] [footer]
 
-data block      = [payload][u8 type]          type 0: payload = entry...
-                                              type 1: payload = [u32 raw size][LZ4 block of entry...]
+data block      = [payload][u32 last entry][u8 type]   type 0: payload = entry...
+                                                       type 1: payload = [u32 raw size][LZ4 block of entry...]
+                  last entry: the offset of the last entry among the decompressed entries
 entry           = [u32 key length][key][u64 sequence][u8 kind][u32 value length][value]
 range tombstone = [u32 count] ([u32 length][begin][u32 length][end][u64 sequence])...
 filter          = [u32 bit count][u8 hash count][bits]     Bloom filter over the user keys of a partition
@@ -40,11 +41,11 @@ index           = [u32 count] ([u32 length][last key][u64 last sequence][u64 off
 properties      = [u64 entries][u64 min sequence][u64 max sequence][u32 length][smallest][u32 length][largest]
 top-level index = [u32 count] ([u32 length][last key][u64 last sequence][u64 index offset][u32 index size]
                                [u64 filter offset][u32 filter size])...
-footer          = 4 handles (range tombstone, filter, properties, top-level index) as [u64 offset][u32 size],
-                  then [u32 format version][u32 CRC-32 of the 52 bytes before it][u64 magic]
+footer          = [u64 table id], then 4 handles (range tombstone, filter, properties, top-level index)
+                  as [u64 offset][u32 size], then [u32 format version][u32 CRC-32 of the 60 bytes before it][u64 magic]
 ```
 
-Each block is followed by the CRC-32 of its payload. A data block also has a type byte between its payload and the CRC-32, and the CRC-32 covers the type too, as the block trailer of RocksDB does. In version 4, the filter handle of the footer is (0, 0), because each partition names its own filter. The magic number is `SOLARIM1`.
+Each block is followed by the checksum of its payload. A data block also has the offset of its last entry and a type byte between its payload and the checksum, and the checksum covers both. In versions 5 and 4, the filter handle of the footer is (0, 0), because each partition names its own filter. The magic number is `SOLARIM1`.
 
 `TableFormat` in `src/Solarium/Engine/TableFormat.cs` documents the exact layout.
 
@@ -56,11 +57,24 @@ Each block is followed by the CRC-32 of its payload. A data block also has a typ
 - **The versions of one key can span blocks and partitions**, because each index holds last internal keys. A key whose versions continue into the next partition is in both filters.
 - **Exclusive largest bound.** A table records when its largest bound is the end of a range tombstone that none of its entries has. Then two tables of a level can meet at that key without overlapping. See [Compaction](compaction.md#the-merge).
 
+## How a table proves its place {#how-a-table-proves-its-place}
+
+A plain CRC-32 shows that the bytes of a block are whole. It does not show that the block is at the right place. A write that went to the wrong offset leaves a block that passes its CRC-32. Then a read can search the wrong keys and answer "not found". Version 5 of the table format closes this gap in three ways:
+
+- **Checksums are bound to the table and the offset.** Each table has a random nonzero 64-bit id in its footer. The stored checksum of a block is its CRC-32 XOR a modifier of the id and the offset of the block, as the context checksum of RocksDB. So a block copied from another place or another table fails its checksum. The CRC-32 of the footer has no modifier, because it covers the id.
+- **The manifest records each table.** An open compares the id, the size, the entry count, the sequence numbers, and the key range with the file. So a table file that another valid table replaced fails the open.
+- **A data block must match its index entry.** Each read of a block from the file checks that its last key is the one that the index holds, and that its first key comes after the block before it. This check runs on tables of every version.
+
+A version 5 data block names the offset of its last entry, so the key check decodes two entries. An older block is walked from the start. A point read walks half a block on average, so a walk of the whole block almost doubled the work inside a block for a `Get` that misses the cache: 11% to 15% fewer uncached `Get` operations per second on a store in memory. With the named entry, the rate is about 4% below the rate without the check.
+
+A failed check throws `SolariumException` with `IsCorruption` set. [Durability](../operations/durability.md#damage-to-an-sstable) lists what is checked and when.
+
 ## Versions
 
 | Version | Difference |
 | --- | --- |
-| 4 | The current version. The index and the filter are cut into partitions under a top-level index. |
+| 5 | The current version. Each table has an id, block checksums are bound to the id and the offset, and each data block names its last entry. The footer is 72 bytes. |
+| 4 | The index and the filter are cut into partitions under a top-level index. Plain CRC-32 checksums, and a footer of 64 bytes. It still reads, until a compaction rewrites it. |
 | 3 | One index block and one filter block, which read as one partition. Data blocks have a type byte and can be compressed. It still reads, until a compaction rewrites it. |
 | 2 | Written before data blocks had a type. Its data blocks are raw entries. It still reads, until a compaction rewrites it. |
 

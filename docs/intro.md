@@ -9,7 +9,7 @@ Solarium is an embedded key-value store for .NET, written in managed code. Its d
 Solarium exists to be a durable log store for [Kommander](https://kahunakv.github.io/kommander.github.io/), the Raft library for .NET. It covers the part of RocksDB that the Raft log of Kommander uses, and RocksDB is the reference behavior. A host can plug Solarium into Kommander in place of RocksDB, with no native library.
 
 :::note A young database
-Solarium is a brand-new database, at version 0.1.3. Its on-disk format can still change. Read [What is not done yet](#what-is-not-done-yet) before you use it for data that you cannot lose.
+Solarium is a brand-new database, at version 0.1.6. Its on-disk format can still change. Read [What is not done yet](#what-is-not-done-yet) before you use it for data that you cannot lose.
 :::
 
 ## In simple terms
@@ -100,6 +100,7 @@ db.DeleteRange("log:0000"u8, "log:0001"u8);
 - The embedded API, column families, atomic batches across them, `DeleteRange`, and iterators with an upper bound.
 - Group commit with pipelined writes, and lock-free reads on a skip-list memtable.
 - WAL recovery that cuts a torn tail and refuses damage to flushed data. Power-loss tests and kill tests check it.
+- SSTable checksums bound to the table and the offset of each block, data blocks checked against their index entries, and opens that refuse a table file that the manifest does not record. All are reported as corruption (`SolariumException.IsCorruption`).
 - Memtable flushes to SSTables, LZ4 block compression, WAL rotation with a size cap, the manifest, leveled compaction into the seven levels of RocksDB with its dynamic level sizing, up to `MaxBackgroundCompactions` compactions at once, a rate limiter and `BytesPerSync` for flushes and compactions, a memtable budget shared across databases (`WriteBufferManager`), a block cache that bounds the memory of the index and filter blocks, can hold the memtable budget too, and caches data blocks when you ask, `DeleteFilesInRange`, checkpoints, and write stalls.
 - The RocksDB properties and the live-file metadata that Kommander reads.
 - `Solarium.Kommander`. It passes the conformance suite of Kommander for WAL backends and the behavior tests of its RocksDB backend. It runs three-node Kommander clusters in the tests and publishes the engine `raft.wal.*` metrics.

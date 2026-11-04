@@ -105,6 +105,7 @@ The tests that write SSTables run on each storage environment that the machine h
 ## Other tests
 
 - `SolariumDbTests` deletes the `MANIFEST` of a checkpoint, of a flushed database, and of a database with WAL files only. `Open` must refuse each one and change no byte of its files.
+- `MisplacedBlockTests` swaps data blocks of equal size, copies a block from another table, and replaces a table with an older one of the same size or with the same-numbered table of another store. Each read or open must fail as corruption. A fixture written by the release before format 6 must still open, read, and compact.
 - `MemTableTests` checks the runs of range tombstones in the memtable against a scan of all of them, after every range delete and at every snapshot, while readers race the writer.
 - In the Kommander tests, a read gate holds a commit marker while a higher commit of the same partition, or a partition delete, races it. The persisted commit frontier must not move back.
 

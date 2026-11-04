@@ -12,7 +12,7 @@ It targets Kommander 1.12.0 and .NET 10. Install it from NuGet:
 dotnet add package SolariumDb.Kommander
 ```
 
-This is version 0.1.3, so the on-disk format can still change.
+This is version 0.1.6, so the on-disk format can still change.
 
 ```mermaid
 flowchart LR

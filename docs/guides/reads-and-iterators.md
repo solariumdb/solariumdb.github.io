@@ -114,3 +114,5 @@ Use one iterator from one thread at a time. You can create many iterators at the
 ## Reads after a failure
 
 After a WAL, flush, or compaction failure, writes stop, but reads continue. A read sees the data up to the last published write.
+
+A read that finds damage in a data block throws `SolariumException` with `IsCorruption` set. Other keys still read. See [Damage to an SSTable](../operations/durability.md#damage-to-an-sstable).

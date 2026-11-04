@@ -131,7 +131,7 @@ A record for one live SSTable, from `GetLiveFilesMetaData`:
 
 | Exception | When |
 | --- | --- |
-| `SolariumException` | A failure of the engine itself: corruption, or a write after a WAL, flush, or compaction failure. |
+| `SolariumException` | A failure of the engine itself: corruption, or a write after a WAL, flush, or compaction failure. `bool IsCorruption` is true for damage in a table, the WAL, or the manifest that no crash explains, as `Status::IsCorruption` of RocksDB. A retry fails again. An exception that wraps a corruption is a corruption too. See [Damage to an SSTable](../operations/durability.md#damage-to-an-sstable). |
 | `ObjectDisposedException` | A call after `Dispose`. |
 | `ArgumentException` | An option out of range, a range delete whose end comes before its begin, or a checkpoint directory that exists. |
 | `KeyNotFoundException` | `GetColumnFamily` with a name that does not exist. |

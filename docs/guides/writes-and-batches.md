@@ -64,7 +64,7 @@ So sixteen threads that each write a synced batch cause one device flush, not si
 | Error | Cause |
 | --- | --- |
 | `ArgumentException` from `DeleteRange` | The end key comes before the begin key. The batch does not change. |
-| `SolariumException` | The engine failed: a WAL, flush, or compaction failure happened before. |
+| `SolariumException` | The engine failed: a WAL, flush, or compaction failure happened before. `IsCorruption` tells [damage to the files](../operations/storage-failures.md#corruption) from a failure of the storage. |
 | `ObjectDisposedException` | The database is disposed. |
 
 After a WAL, flush, or compaction failure, the database refuses all writes until you open it again. Reads continue. [Storage Failures](../operations/storage-failures.md) explains why and what to do.

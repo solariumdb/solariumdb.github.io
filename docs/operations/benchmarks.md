@@ -16,6 +16,8 @@ Every result on this page comes from one session on 2026-10-29, unless its secti
 Your hardware, your kernel, and your workload give other numbers. Run the benchmarks on your own hardware before you decide.
 :::
 
+These results come before the checks of each data block against its index entry. When those checks were added, uncached `Get` operations on a store in memory ran about 4% slower than without them. The suites did not run again after that. See [SSTables](../architecture/sstables.md#how-a-table-proves-its-place).
+
 Before 2026-10-29, synced writes on this drive took 4 to 8 ms. So the synced rates in older results are 2 to 5 times lower than here. The ratios between the engines carry over.
 
 The GC changes the result of a change. Under the workstation GC, the default of BenchmarkDotNet, collections took 20% to 29% of an unsynced `Put`. Under the server GC, they took 7% to 9%. A change that wins under one GC can lose under the other.

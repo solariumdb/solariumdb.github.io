@@ -23,7 +23,7 @@ A native storage engine is a closed box under a .NET service. You cannot change 
 ## What you get
 
 - **No native library.** Solarium is C#, all of it. One set of assemblies runs on every platform that .NET 10 runs on. No binary for each operating system and CPU can be missing or wrong at run time.
-- **A clear durability model.** A synced write survives a power loss when `Write` returns. An unsynced write survives a process crash. Recovery tells a crash from damage that no crash can cause, and refuses to open rather than drop flushed data. See [Durability](operations/durability.md).
+- **A clear durability model.** A synced write survives a power loss when `Write` returns. An unsynced write survives a process crash. Recovery tells a crash from damage that no crash can cause, and refuses to open rather than drop flushed data. A block at the wrong place fails as corruption, so a read does not answer "not found" for a key that the store holds. See [Durability](operations/durability.md).
 - **Atomic batches across column families.** One `WriteBatch` can write log entries in one column family and metadata in another. After a crash, the database holds all of the batch or none of it.
 - **Fast writes from many threads.** Group commit lets concurrent writers share one WAL append and one flush. Sixteen synced writers pay for one device flush, not sixteen.
 - **Reads that take no engine locks.** A read sees one consistent snapshot, and never waits for a writer to finish a batch. With a block cache, a lookup takes the lock of one cache shard.
@@ -61,7 +61,7 @@ Solarium is not the right choice when:
 - you need a database server with a network protocol. Solarium is a library;
 - your store is much larger than memory and needs a cache of data blocks in the process. Solarium can cache data blocks (`CacheDataBlocks`), but on a store ten times the cache its LRU cache made reads slower than the page cache alone. See [Data blocks in a cache](operations/benchmarks.md#data-blocks-in-a-cache);
 - your workload needs fast synced writes beside heavy compactions on a large store, and you want the engine to find the pace on its own. Solarium paces flushes and compactions at a fixed rate that you choose for your drive and your ingest, and its auto-tuned rate did not protect synced writes in the benchmark. See [Paced background writes](operations/benchmarks.md#paced-background-writes);
-- you cannot test it yourself before production. Solarium is a young database at version 0.1.3, and its on-disk format can still change.
+- you cannot test it yourself before production. Solarium is a young database at version 0.1.6, and its on-disk format can still change.
 
 ## How fast is it?
 
