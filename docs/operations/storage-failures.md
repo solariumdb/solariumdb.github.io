@@ -27,9 +27,9 @@ A failed memtable insert has the same effect. The WAL holds the whole group, but
 
 Nothing that was acknowledged is lost. Synced writes were flushed, and unsynced writes reached the operating system.
 
-## SolariumWAL reopens on its own
+## SolariumWAL and the Kahuna store reopen on their own
 
-`SolariumWAL`, the Kommander WAL, does the reopen for you. After a failure:
+`SolariumWAL`, the Kommander WAL, and the store of `Solarium.Kahuna` do the reopen for you, except after [corruption](#corruption). After a failure, `SolariumWAL`:
 
 1. It writes a small probe file through the storage environment, to check that the volume takes a durable write.
 2. It writes a canary put, to check whether the database takes a write.
@@ -47,6 +47,8 @@ Corruption is damage in a table, the WAL, or the manifest that no crash explains
 | True | Damage to the files | A retry fails the same way, and a reopen does not repair the files. Take the data from another copy, for example a checkpoint or another node. |
 
 A read that finds corruption fails, and other keys still read. A compaction that finds it stops writes, as any compaction failure does. The exception of the refused write has `IsCorruption` set too, so it still reports the damage. See [Damage to an SSTable](durability.md#damage-to-an-sstable).
+
+The Kommander and Kahuna adapters fail-stop on corruption. They refuse every later write and never reopen, and the node leaves consensus. See [Storage damage in SolariumWAL](../integrations/kommander.md#storage-damage) and [in the Kahuna store](../integrations/kahuna.md#storage-damage).
 
 ## Dispose after a failure
 

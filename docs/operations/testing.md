@@ -111,7 +111,7 @@ The tests that write SSTables run on each storage environment that the machine h
 
 ## Kommander and Kahuna tests
 
-- `tests/Solarium.Kommander.Tests` holds the conformance suite of Kommander, the ported `RocksDbWAL` behavior tests, `WalCrashTests`, `ClusterTests`, and `MetricsTests`. See [Solarium.Kommander](../integrations/kommander.md#tests).
-- `tests/Solarium.Kahuna.Tests` holds the ported behavior tests of the RocksDB backend of Kahuna. See [Solarium.Kahuna](../integrations/kahuna.md#tests).
+- `tests/Solarium.Kommander.Tests` holds the conformance suite of Kommander, the ported `RocksDbWAL` behavior tests, `WalCrashTests`, `ClusterTests`, `MetricsTests`, and the storage-damage tests `LostSyncedWriteTests`, `StorageDamageTests`, and `StorageVerdictTests`. See [Solarium.Kommander](../integrations/kommander.md#tests).
+- `tests/Solarium.Kahuna.Tests` holds the ported behavior tests of the RocksDB backend of Kahuna, and the storage-damage tests `TestStorageCorruption` and `TestStorageCorruptionNode`. See [Solarium.Kahuna](../integrations/kahuna.md#tests).
 
 `WalCrashTests` runs 24 runs on each environment. `SOLARIUM_WAL_CRASH_ITERATIONS` and `SOLARIUM_WAL_CRASH_SEED` change that.

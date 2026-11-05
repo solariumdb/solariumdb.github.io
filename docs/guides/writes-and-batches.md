@@ -59,6 +59,22 @@ So sixteen threads that each write a synced batch cause one device flush, not si
 
 [Write Path](../architecture/write-path.md) explains group commit in detail.
 
+## Know what a synced write made durable
+
+`WriteBatch.Sequence` is the sequence number that the database gave the first operation of the batch. `Write` sets it when it returns. It lets you record what a synced write made durable, for example in a file beside the database:
+
+```csharp
+WriteBatch batch = new WriteBatch()
+    .Put("log:0001"u8, "entry"u8)
+    .Put("log:0002"u8, "entry"u8);
+
+db.Write(batch, WriteOptions.Synced);
+
+long durable = batch.Sequence + batch.Count - 1;
+```
+
+Every sequence number at or below `durable` is durable when a synced `Write` returns. The value is 0 for a batch that was never written. A later write of the batch sets it again.
+
 ## Errors
 
 | Error | Cause |

@@ -9,7 +9,7 @@ Solarium is an embedded key-value store for .NET, written in managed code. Its d
 Solarium exists to be a durable log store for [Kommander](https://kahunakv.github.io/kommander.github.io/), the Raft library for .NET. It covers the part of RocksDB that the Raft log of Kommander uses, and RocksDB is the reference behavior. A host can plug Solarium into Kommander in place of RocksDB, with no native library.
 
 :::note A young database
-Solarium is a brand-new database, at version 0.1.6. Its on-disk format can still change. Read [What is not done yet](#what-is-not-done-yet) before you use it for data that you cannot lose.
+Solarium is a brand-new database, at version 0.1.7. Its on-disk format can still change. Read [What is not done yet](#what-is-not-done-yet) before you use it for data that you cannot lose.
 :::
 
 ## In simple terms
@@ -103,12 +103,12 @@ db.DeleteRange("log:0000"u8, "log:0001"u8);
 - SSTable checksums bound to the table and the offset of each block, data blocks checked against their index entries, and opens that refuse a table file that the manifest does not record. All are reported as corruption (`SolariumException.IsCorruption`).
 - Memtable flushes to SSTables, LZ4 block compression, WAL rotation with a size cap, the manifest, leveled compaction into the seven levels of RocksDB with its dynamic level sizing, up to `MaxBackgroundCompactions` compactions at once, a rate limiter and `BytesPerSync` for flushes and compactions, a memtable budget shared across databases (`WriteBufferManager`), a block cache that bounds the memory of the index and filter blocks, can hold the memtable budget too, and caches data blocks when you ask, `DeleteFilesInRange`, checkpoints, and write stalls.
 - The RocksDB properties and the live-file metadata that Kommander reads.
-- `Solarium.Kommander`. It passes the conformance suite of Kommander for WAL backends and the behavior tests of its RocksDB backend. It runs three-node Kommander clusters in the tests and publishes the engine `raft.wal.*` metrics.
-- `Solarium.Kahuna`, a port of the RocksDB persistence backend of Kahuna that passes its behavior tests. A Kahuna server loads its providers as an extension for `--storage solarium` and `--wal-storage solarium`.
+- `Solarium.Kommander`. It passes the conformance suite of Kommander for WAL backends and the behavior tests of its RocksDB backend. It runs three-node Kommander clusters in the tests and publishes the engine `raft.wal.*` metrics. It implements the storage-damage contract of Kommander: the term and vote flushed before they count, the acknowledged-presence watermark, a sync ledger and a hard-state ledger that find a WAL file cut after its fsync, and a fail-stop on corruption.
+- `Solarium.Kahuna`, a port of the RocksDB persistence backend of Kahuna that passes its behavior tests. A Kahuna server loads its providers as an extension for `--storage solarium` and `--wal-storage solarium`. It implements the storage-damage contract of Kahuna: a fail-stop on corruption, declared durability floors, and a store stamped with the identity of its node.
 
 ## What is not done yet
 
-- **Recovery from an engine failure without a reopen.** After a WAL, flush, or compaction failure, the database refuses all writes until you open it again. `SolariumWAL` reopens it automatically.
+- **Recovery from an engine failure without a reopen.** After a WAL, flush, or compaction failure, the database refuses all writes until you open it again. `SolariumWAL` and the Kahuna store reopen it automatically, except after corruption, on which they fail-stop.
 - **A cache for data blocks that pays on stores larger than the cache.** With the LRU cache, `CacheDataBlocks` made reads faster on a store that fits in the cache, but slower on a store ten times its size. So it is off by default, and the page cache of the operating system serves the data blocks.
 - **Subcompactions and more than one flush thread.** One merge always runs on one thread, as with `max_subcompactions` of 1 in RocksDB. Flushes have one thread.
 

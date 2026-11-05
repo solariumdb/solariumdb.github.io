@@ -61,7 +61,7 @@ Solarium is not the right choice when:
 - you need a database server with a network protocol. Solarium is a library;
 - your store is much larger than memory and needs a cache of data blocks in the process. Solarium can cache data blocks (`CacheDataBlocks`), but on a store ten times the cache its LRU cache made reads slower than the page cache alone. See [Data blocks in a cache](operations/benchmarks.md#data-blocks-in-a-cache);
 - your workload needs fast synced writes beside heavy compactions on a large store, and you want the engine to find the pace on its own. Solarium paces flushes and compactions at a fixed rate that you choose for your drive and your ingest, and its auto-tuned rate did not protect synced writes in the benchmark. See [Paced background writes](operations/benchmarks.md#paced-background-writes);
-- you cannot test it yourself before production. Solarium is a young database at version 0.1.6, and its on-disk format can still change.
+- you cannot test it yourself before production. Solarium is a young database at version 0.1.7, and its on-disk format can still change.
 
 ## How fast is it?
 

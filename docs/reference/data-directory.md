@@ -13,6 +13,7 @@ A Solarium database is one directory. This page lists the files in it and what e
 | `MANIFEST` | The live WAL files, the column families, their SSTables with the level of each, and the flush point of each column family. |
 | `NNNNNN.log` | A WAL file. |
 | `NNNNNN.sst` | An SSTable. |
+| `.*` | A file of an application, never of the database. See [Application files](#application-files). |
 
 ## LOCK
 
@@ -47,7 +48,7 @@ The current manifest is version 4, which adds the id of each table to the levels
 
 At open, each table file must match its record: its id when the record has one, its size, its entry count, its sequence numbers, and its key range. A mismatch fails the open. See [Damage to an SSTable](../operations/durability.md#damage-to-an-sstable).
 
-A first open writes the manifest after `FORMAT` and before any WAL or SST file. So `Open` takes a directory without a manifest as new only when it holds nothing but `LOCK`, `FORMAT`, and temporary files. It refuses a directory with any other file and no manifest, because its manifest was lost. It changes nothing in that directory.
+A first open writes the manifest after `FORMAT` and before any WAL or SST file. So `Open` takes a directory without a manifest as new only when it holds nothing but `LOCK`, `FORMAT`, temporary files, and application files. It refuses a directory with any other file and no manifest, because its manifest was lost. It changes nothing in that directory.
 
 ## WAL files
 
@@ -58,6 +59,10 @@ Each `NNNNNN.log` file is a WAL file. A new WAL file starts at the first write g
 Each `NNNNNN.sst` file is an SSTable. It never changes after the manifest names it. A file that leaves the manifest is deleted when the last version that lists it closes. [SSTables](../architecture/sstables.md) gives the format.
 
 A checkpoint links SSTables into its copy under their own numbers.
+
+## Application files
+
+A file whose name starts with `.` belongs to an application. Solarium writes none, and an open neither reads nor deletes one, as RocksDB ignores the names that it does not know. So an application can keep records beside the database, and a directory whose database files were lost while those records survived opens as a new database. `SolariumWAL` keeps its [ledgers](../integrations/kommander.md#storage-damage) here.
 
 ## Orphan files
 

@@ -47,7 +47,9 @@ The open also fails, and changes nothing, for a directory with data files but no
 
 ## The one case that can drop a synced write
 
-The cut can drop a synced write only in one case: flushed data was damaged in a way that no crash causes, and no record was written after it. That is damage inside the last synced group of the file, with nothing appended since. Then nothing in the file shows that the group was flushed.
+The cut can drop a synced write only in one case: flushed data was damaged in a way that no crash causes, and no record was written after it. That is damage inside the last synced group of the file, with nothing appended since. Then nothing in the file shows that the group was flushed. A WAL file cut after its fsync is one such case.
+
+To find this case, keep a proof outside the WAL. After a synced write, [`WriteBatch.Sequence`](../guides/writes-and-batches.md#know-what-a-synced-write-made-durable) tells which sequence numbers are durable. At open, compare the number that you recorded with `LatestSequenceNumber`. [`SolariumWAL`](../integrations/kommander.md#storage-damage) does this with its sync ledger.
 
 RocksDB has two recovery modes for this case:
 

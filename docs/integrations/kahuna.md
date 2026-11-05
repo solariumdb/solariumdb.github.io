@@ -21,12 +21,14 @@ flowchart LR
 
 The package is `SolariumDb.Kahuna`. Its assembly and its namespace are `Solarium.Kahuna`.
 
-It needs Kahuna 1.14.4 or later:
+It needs Kahuna 1.15.4 or later:
 
 - 1.13.4 brought the public storage contract: `IPersistenceBackend` with immutable rows, and the `StorageProviders` registry of `IPersistenceBackendProvider` and `IWalProvider`.
 - 1.14.1 brought the storage settings that pace the compactions.
 - 1.14.2 brought the memory that the WAL and the store share.
 - 1.14.4 brought the `--extension-option` settings, and the `System.IO.Hashing` version that Solarium uses.
+- 1.15.3, with Kommander 1.13.1, brought the [storage-damage contract](#storage-damage) of the store and the WAL.
+- 1.15.4 brought Kommander 1.13.2, whose snapshot installs no longer flood a follower with appends that it cannot apply.
 
 ## Load it into a Kahuna server
 
@@ -127,7 +129,18 @@ An embedded node gives the extension options in `EmbeddedKahunaOptions.Extension
 - revision pruning, with its memo, its sweep, and its quiescence proof;
 - the scans, with the snapshot prefix scan and the seek over a deep revision run;
 - the recovery from a storage failure: close and reopen in place, behind a swap fence;
-- checkpoints: plain, exact as-of, key-filtered, and the merge of the share of one node into another.
+- checkpoints: plain, exact as-of, key-filtered, and the merge of the share of one node into another;
+- the storage-damage contract: the fail-stop on damage, the declared durability floors, and the store identity.
+
+## Storage damage
+
+A store with damaged files must not answer as if the data were absent, and a node must know when its store was lost or replaced. Kahuna 1.15 added a storage-damage contract to `IPersistenceBackend` for these cases, with defaults that do nothing. `SolariumPersistenceBackend` implements it, as the RocksDB backend does.
+
+- **Fail-stop on damage.** The first `SolariumException` with `IsCorruption`, from any read, batched read, scan, write, or open, stops the store on purpose, with one Critical line. Every later operation throws `StorageCorruptionException`, which Kahuna answers with the terminal `StorageCorrupt`, not `MustRetry`. The store methods return false. `GetFailStopReason` names the damage. `TryRecoverFromStorageFailure` declines without closing or reopening the store, so its files stay as they are. An iterator throws at a damaged block, so no scan ends short.
+- **What the node does.** Kahuna withholds candidacy, steps down every partition that the node hosts, and reports the fault in its storage health. A damaged open throws `StorageCorruptionException`, and the node does not start.
+- **Durability floors.** `KeepsDurabilityFloors` is true. The store keeps every floor that it is given, so a data partition with none was never flushed here, and Kahuna answers 0 for it. This lets Kommander refuse to replay a compacted suffix onto a store that lost its prefix. A floor row that is not 8 bytes is damage: it fails the open, and a read of it stops the store.
+- **Store identity.** `SupportsStoreIdentity` is true. The identity is the Raft endpoint of the node, a creation id, and a time, in a synced row in the reserved `\0` namespace (`\0store_identity`). No scan sees it, and it is not durable state (`HoldsDurableState`). Kahuna stamps a fresh store at its first open, refuses a store stamped by another node, stamps a store written before the identity existed, and reports a store found empty under a log with history as lost or replaced. A row that does not decode is damage.
+- **Restores and seeds.** An as-of image and a merge carry no identity, so the node that opens one stamps it. A plain checkpoint, a copy of the store of the node, keeps its identity, as in the RocksDB backend.
 
 ## Differences from the RocksDB backend
 
@@ -164,7 +177,11 @@ The [Kahuna benchmarks](../operations/benchmarks.md#the-persistence-backend-of-k
 - revision pruning: memo, sweep quiescence, time budget, and snapshot floor;
 - as-of reads: revision at or before, probes, run seeks, prefix scans, batched gets, the monotonic current head, and no-revision writes;
 - checkpoints: as-of, the pruned-history floor, key-filtered composition, and merge;
-- the recovery from a storage failure.
+- the recovery from a storage failure;
+- `TestStorageCorruption`, which damages real files on both storage environments. A flipped byte in a data block makes a range scan, a point read, a batched read, and a whole scan of a column family throw `StorageCorruptionException`. The store then refuses everything, and declines the recovery with its files unchanged. A truncated table, a floor row of the wrong length, and an identity row that does not decode are refused;
+- `TestStorageCorruptionNode`, which runs a whole embedded node on a Solarium store and WAL. A damaged block answers the first read with `StorageCorrupt` and takes the node out of consensus. A single node whose store directory was lost under a surviving log reports it as replaced, and rebuilds it from the log.
+
+A three-node cluster with a wiped store is not tested.
 
 A recovery test injects a write failure through `HookedEnvironment` on the default and io_uring storage environments. The other ported tests run on the default storage environment, as those of Kahuna do.
 

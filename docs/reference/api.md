@@ -71,6 +71,7 @@ Writes that apply all together or not at all, across any number of column famili
 | `WriteBatch Delete(ReadOnlySpan<byte> key, ColumnFamily? family = null)` | Adds a delete. |
 | `WriteBatch DeleteRange(ReadOnlySpan<byte> begin, ReadOnlySpan<byte> end, ColumnFamily? family = null)` | Adds a range delete. An empty range adds nothing. An end before the begin throws `ArgumentException`, and the batch does not change. |
 | `int Count` | The number of operations. |
+| `long Sequence` | The sequence number of the first operation, set when `Write` returns. The operations hold `Sequence` to `Sequence + Count - 1`. 0 for a batch that was never written. With a synced write, every sequence number at or below the last of the batch is durable when `Write` returns. RocksDB writes the same number into the header of a batch (`WriteBatchInternal::Sequence`). |
 | `void Clear()` | Removes every operation, so you can use the batch again. |
 
 ## Iterator
