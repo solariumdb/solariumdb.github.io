@@ -19,10 +19,10 @@ The reasons:
 
 - A **synced** write (`WriteOptions.Sync`) flushes the WAL to the device before `Write` returns.
 - An **unsynced** write is in the WAL file in the operating system when `Write` returns. The operating system keeps it when the process dies, but a power loss can lose it. This is the same as in RocksDB.
-- `Dispose` flushes the current WAL file. So after a clean close, every write survives a power loss. RocksDB does not do this: its unsynced writes need `SyncWAL` before the close.
+- `Dispose` flushes the current WAL file. So after a clean close, every write survives a power loss. In RocksDB, unsynced writes need `SyncWAL` before the close.
 - A batch is one WAL record with a checksum. Recovery replays a record whole, or drops it whole.
 
-## A crash and a power loss are different
+## Process crash and power loss
 
 - A **process crash** can only cut the last write short. The operating system keeps everything else that the process wrote.
 - A **power loss** can lose any sector written since the last flush, in any order. So the newest WAL file can end with damage that has intact records after it.
@@ -45,11 +45,11 @@ flowchart TD
 
 The open also fails, and changes nothing, for a directory with data files but no `MANIFEST`. A crash during a flush or a compaction leaves orphan files, and the next open deletes them. [WAL and Recovery](../architecture/wal-and-recovery.md#recovery-rules) gives the exact rules. Damage in the WAL or the manifest throws `SolariumException` with `IsCorruption` set.
 
-## The one case that can drop a synced write
+## Damage in the last synced group
 
-The cut can drop a synced write only in one case: flushed data was damaged in a way that no crash causes, and no record was written after it. That is damage inside the last synced group of the file, with nothing appended since. Then nothing in the file shows that the group was flushed. A WAL file cut after its fsync is one such case.
+The cut drops a synced write only when flushed data was damaged in a way that no crash causes, and no record was written after it. That is damage inside the last synced group of the file, with nothing appended since. Then nothing in the file shows that the group was flushed. A WAL file cut after its fsync is one such case.
 
-To find this case, keep a proof outside the WAL. After a synced write, [`WriteBatch.Sequence`](../guides/writes-and-batches.md#know-what-a-synced-write-made-durable) tells which sequence numbers are durable. At open, compare the number that you recorded with `LatestSequenceNumber`. [`SolariumWAL`](../integrations/kommander.md#storage-damage) does this with its sync ledger.
+To find this case, keep a proof outside the WAL. After a synced write, [`WriteBatch.GroupLastSequence`](../guides/writes-and-batches.md#know-what-a-synced-write-made-durable) tells which sequence numbers are durable. At open, compare the number that you recorded with `LatestSequenceNumber`. [`SolariumWAL`](../integrations/kommander.md#storage-damage) does this with its sync ledger.
 
 RocksDB has two recovery modes for this case:
 

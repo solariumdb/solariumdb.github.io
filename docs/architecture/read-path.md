@@ -13,7 +13,7 @@ A read takes two things, in this order, as in RocksDB:
 1. The **version** of the column family: the memtables and SSTables that it searches.
 2. The **snapshot**: the last published sequence number.
 
-The order matters. A version never loses data that its own snapshot can see. A newer version can lose it, because a compaction installed later can drop old versions of keys. So the read takes the version first, and only then a snapshot that is at least as new.
+A version never loses data that its own snapshot can see. A newer version can lose it, because a compaction installed later can drop old versions of keys. So the read takes the version first, and only then a snapshot that is at least as new.
 
 The snapshot can be newer than the memtables of the version. That is safe: a memtable switch splits the sequence numbers at one point. Entries above the snapshot are skipped, and entries at or below it are all in the version. So the read sees the whole state at one sequence number.
 
@@ -70,6 +70,10 @@ An iterator merges one cursor for each source:
 - **Forward.** Each step takes the smallest key under any cursor, and moves every cursor past it. The step skips deleted keys, keys under a range tombstone, and versions above the snapshot.
 - **Backward.** Each step asks each source for its largest key below the current key, and looks up the winner. So a step costs a search in every source, and `Prev` is slower than `Next`.
 
+A cursor over a table reads keys and values where they are in a data block: in the block of the cache, which the cursor holds a reference on, or in a buffer of its own. It gives the block back when it moves to the next block, when it passes its last entry, and when the iterator is disposed. So a step of a scan allocates nothing.
+
+Once the reads of a cursor follow one another, it reads ahead, as the iterators of RocksDB do. From the third block in a row, a read takes 8 KiB, and each read after it takes twice as many, up to 256 KiB. A seek to another place starts again with single blocks. An iterator asks only the sources that hold a range tombstone whether one covers a key. In a store with no range tombstones, a step asks no source.
+
 An iterator keeps the snapshot and the version of its creation. A later flush or compaction does not change what it sees. It keeps the SSTables of that version open until you dispose it.
 
 ## Reader counts
@@ -84,7 +88,7 @@ The read takes no lock to get its version. It reads the current version with a v
 
 ## Caches
 
-**Data blocks** go to the block cache of the column family only with `CacheDataBlocks`, which is off by default. Without it, each data block that a read needs is read from the file through the storage environment, and the page cache of the operating system is the only cache. A compressed block is decompressed on each read. In the Kahuna benchmarks, with the tables in the page cache, reads matched or beat RocksDB with its block cache. See [Benchmarks](../operations/benchmarks.md).
+**Data blocks** go to the block cache of the column family only with `CacheDataBlocks`, which is off by default. Without it, each data block that a read needs is read from the file through the storage environment, and the page cache of the operating system is the only cache. A compressed block is decompressed on each read. In the Kahuna benchmarks, with the tables in the page cache, reads were as fast as RocksDB with its block cache, or faster. See [Benchmarks](../operations/benchmarks.md).
 
 With `CacheDataBlocks`:
 

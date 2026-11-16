@@ -70,7 +70,7 @@ The write-ahead log (WAL) is a file that only grows. Every batch goes to it as o
 
 ### Fsync and the page cache {#fsync}
 
-When a process writes to a file, the operating system first keeps the bytes in memory, in the page cache. An fsync, or a flush to the device, tells the operating system to write them to the drive and wait. An fsync takes far longer than a write to the page cache. Solarium never caches SSTable data blocks itself, so the page cache is their only cache. See [Tuning](operations/tuning.md#memory).
+When a process writes to a file, the operating system first keeps the bytes in memory, in the page cache. An fsync, or a flush to the device, tells the operating system to write them to the drive and wait. An fsync takes far longer than a write to the page cache. By default, Solarium does not cache SSTable data blocks itself, so the page cache is their only cache. `CacheDataBlocks` keeps them in a block cache too. See [Tuning](operations/tuning.md#memory).
 
 ### Synced and unsynced write {#synced-and-unsynced-write}
 
@@ -90,7 +90,7 @@ A process crash leaves the page cache in place, so the operating system still wr
 
 ### Group commit {#group-commit}
 
-Group commit lets many writer threads share one WAL append and one fsync. Concurrent writers form a group, and one leader writes the records of the whole group. Sixteen synced writers in one group pay for one fsync, not sixteen. See [Write Path](architecture/write-path.md).
+Group commit lets many writer threads share one WAL append and one fsync. Concurrent writers form a group, and one leader writes the records of the whole group. Sixteen synced writers in one group share one fsync. See [Write Path](architecture/write-path.md).
 
 ### Recovery and the durable offset {#recovery}
 
@@ -104,11 +104,11 @@ A memtable is a sorted structure in memory, a lock-free skip list, that holds th
 
 ### Flush {#flush}
 
-A flush writes an immutable memtable to disk as a level 0 SSTable. After the flush, the WAL files that no memtable needs are deleted. One background thread does all flushes. This flush is different from a flush to the device: it moves data from memory to a new file. See [Flushes](architecture/flushes.md).
+A flush writes an immutable memtable to disk as a level 0 SSTable. After the flush, the WAL files that no memtable needs are deleted. One background thread does all flushes. This flush moves data from memory to a new file. A flush to the device is an [fsync](#fsync). See [Flushes](architecture/flushes.md).
 
 ### SSTable {#sstable}
 
-A sorted string table (SSTable) is a file of sorted keys and values that never changes after it is written. It holds data blocks, an index of the blocks, and Bloom filters that skip files without the key. The index and the filters are cut into partitions of about 4 KB. A compaction replaces SSTables. It never edits them. See [SSTables](architecture/sstables.md).
+A sorted string table (SSTable) is a file of sorted keys and values that never changes after it is written. It holds data blocks, an index of the blocks, and Bloom filters that skip files without the key. The index and the filters are cut into partitions of about 4 KB. A compaction writes new SSTables in place of old ones. See [SSTables](architecture/sstables.md).
 
 ### Level {#level}
 
@@ -139,7 +139,7 @@ A version is an immutable list of the memtables and SSTables of a column family,
 
 ### Tombstone {#tombstone}
 
-A delete does not remove a key from a file, because SSTables never change. It writes a tombstone: a marker with a sequence number that hides the older versions of the key. A compaction drops the tombstone when no older version of the key remains below it.
+SSTables never change, so a delete writes a tombstone: a marker with a sequence number that hides the older versions of the key. A compaction drops the tombstone when no older version of the key remains below it.
 
 ### Range tombstone {#range-tombstone}
 

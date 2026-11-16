@@ -25,7 +25,7 @@ A failed memtable insert has the same effect. The WAL holds the whole group, but
 3. Open it again. Recovery replays the WAL and cuts a torn tail.
 4. Retry the writes that failed. A write that threw was not acknowledged, so it may or may not be in the database after the reopen.
 
-Nothing that was acknowledged is lost. Synced writes were flushed, and unsynced writes reached the operating system.
+Every acknowledged write is still there after the reopen. Synced writes were flushed, and unsynced writes reached the operating system.
 
 ## SolariumWAL and the Kahuna store reopen on their own
 
@@ -33,7 +33,7 @@ Nothing that was acknowledged is lost. Synced writes were flushed, and unsynced 
 
 1. It writes a small probe file through the storage environment, to check that the volume takes a durable write.
 2. It writes a canary put, to check whether the database takes a write.
-3. Only when the volume takes the write and the database does not, does it close the database and open it again. Then it retries the operation once.
+3. When the volume takes the write and the database does not, it closes the database and opens it again. Then it retries the operation once. In every other case, it does not reopen.
 
 While the volume still refuses writes, every write reports `Errored`, and Kommander retries on its own cadence. The counter `raft.wal.engine_reopens_total` counts the reopens, tagged `success` or `failed`. See [Solarium.Kommander](../integrations/kommander.md#after-a-storage-failure).
 
@@ -56,4 +56,4 @@ The Kommander and Kahuna adapters fail-stop on corruption. They refuse every lat
 
 ## Not done yet
 
-Recovery from a WAL, flush, or compaction failure without a reopen is not done yet. RocksDB can resume after some background errors without a reopen. Solarium always needs one.
+Recovery from a WAL, flush, or compaction failure without a reopen is not done yet. RocksDB can resume after some background errors without a reopen. Solarium needs a reopen after every such failure.

@@ -6,7 +6,7 @@ sidebar_position: 1
 
 Column families let you keep different kinds of data in one database, each in its own sorted key space, and still change them together. A Raft log keeps its entries in one column family and its metadata in another, and one write batch updates both atomically. If you know SQLite, a column family is like a separate table in one database file.
 
-Each column family has its own memtables, its own SSTables, and its own options. All column families of a database share one WAL and one sequence of sequence numbers. That is what makes a batch across column families atomic.
+Each column family has its own memtables, its own SSTables, and its own options. All column families of a database share one WAL and one sequence of sequence numbers. The shared WAL makes a batch across column families atomic.
 
 ## When to use a column family
 
@@ -16,7 +16,7 @@ Use a separate column family when a group of keys:
 - needs different options, for example a larger memtable or compression;
 - must change atomically with other keys, but must not mix with them in the same key order.
 
-Use key prefixes in one column family when the keys have the same pattern and the same options. A prefix costs nothing, and an iterator with an upper bound reads one prefix only.
+Use key prefixes in one column family when the keys have the same pattern and the same options. A prefix needs no memtable or SSTable of its own, and an iterator with an upper bound reads one prefix only.
 
 Kommander uses both: the column families `default`, `metadata`, and `shard0` to `shard7`, and inside each shard, a key prefix for each partition.
 

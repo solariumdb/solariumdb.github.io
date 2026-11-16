@@ -39,9 +39,9 @@ sequenceDiagram
 7. **Insert.** The batches of the stage go into the active memtables, each operation under the sequence number of its WAL record. In a stage of several writers, the leader tells each writer that still spins to insert its own batch. It inserts its own batch and the batches of the writers that blocked. Then it waits for the last insert, as with the `allow_concurrent_memtable_write` of RocksDB.
 8. **Publish.** The leader of the stage publishes the last sequence number of the stage. This makes its groups visible to reads at once, and groups become visible in WAL order. Then it completes each writer of the stage.
 
-## Why the steps are in this order
+## Benefits of the step order
 
-- **One append for many writers.** A device flush takes milliseconds. Sixteen synced writers in one group pay for one flush, not sixteen.
+- **One append for many writers.** A device flush takes milliseconds. Sixteen synced writers in one group share one flush.
 - **Pipelining.** The next group can write to the WAL while this group inserts into the memtables. In the `Put` benchmarks, pipelining made 3 to 16 unsynced writers 5% to 15% faster.
 - **Parallel inserts.** Each writer reads its own batch from the cache of its own core. The inserts do not run one at a time on the path of the leader.
 - **Publication in WAL order.** A read never sees a group before a group that is earlier in the WAL. So the state that a read sees is always a prefix of the WAL.
@@ -67,7 +67,7 @@ A writer that waits for a WAL flush blocks at once, because the flush takes far 
 
 ## The offer of leadership
 
-The offer of leadership is not a hand-off, unlike in RocksDB. A writer that arrives while no leader is active takes the queue and leads it. The writer that got the offer then waits for that group. A running writer starts the next group sooner than a blocked writer can wake up.
+In RocksDB, the offer of leadership is a hand-off. In Solarium, a writer that arrives while no leader is active takes the queue and leads it. The writer that got the offer then waits for that group. A running writer starts the next group sooner than a blocked writer can wake up.
 
 The leader makes the offer under the write lock, while the writer is still the oldest in the queue, and wakes it after the release. An offer after the release could reach a writer that left the queue since then. That writer waits for its own memtable stage, and it would read the offer as the offer of that stage.
 
@@ -77,4 +77,4 @@ Before it appends its group, a WAL leader checks the write stall state. In a del
 
 ## What a write survives
 
-A write that is not synced survives a process crash, but not a power loss, as in RocksDB. After a clean close, it survives a power loss too, because `Dispose` flushes the current WAL file. See [Durability](../operations/durability.md).
+A write that is not synced survives a process crash, but a power loss can lose it, as in RocksDB. After a clean close, it survives a power loss too, because `Dispose` flushes the current WAL file. See [Durability](../operations/durability.md).

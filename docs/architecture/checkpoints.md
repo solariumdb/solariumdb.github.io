@@ -17,7 +17,7 @@ sidebar_position: 9
 
 The memtables of the source take writes in the meantime. Their newer entries are above the sequence number, so they stay out of the copy.
 
-## Why a link is safe
+## Shared table files
 
 A table file is never written after a manifest names it, and a delete removes only one name. So the copy and the source share the file safely. When the source deletes the file after a compaction, the copy keeps it.
 

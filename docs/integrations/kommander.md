@@ -12,7 +12,7 @@ It targets Kommander 1.13.2 and .NET 10. Install it from NuGet:
 dotnet add package SolariumDb.Kommander
 ```
 
-This is version 0.1.7, so the on-disk format can still change.
+This is version 0.2.1, so the on-disk format can still change.
 
 ```mermaid
 flowchart LR
@@ -67,12 +67,12 @@ io_uring matches the default storage environment on synced writes, because their
 ## Durability
 
 - `syncWrites: true`, the default: a write is flushed to the disk before `Write` returns, so it survives a power loss.
-- `syncWrites: false`: a write reaches the operating system before `Write` returns, so it survives a process crash but not a power loss. This is the same as in `RocksDbWAL`.
+- `syncWrites: false`: a write reaches the operating system before `Write` returns, so it survives a process crash, but a power loss can lose it. This is the same as in `RocksDbWAL`.
 - Hard state (the term and the vote) goes through `SetMetaData`, which is not synced, as in `RocksDbWAL`. The `IWAL` interface of Kommander documents that choice.
 
 ## What it keeps from RocksDbWAL
 
-`SolariumWAL` is a port of the `RocksDbWAL` of Kommander (commit `1bee500`, the release 1.11.3, and its storage-damage contract at commit `e2763bc`, the release 1.13.1). It is not a new design. It keeps:
+`SolariumWAL` is a port of the `RocksDbWAL` of Kommander (commit `1bee500`, the release 1.11.3, and its storage-damage contract at commit `e2763bc`, the release 1.13.1). It keeps:
 
 - the column families `default`, `metadata`, and `shard0` to `shard7`. Partition `p` goes in `shard{p % 8}`;
 - one row for each log entry, under the key `{partition:D10}:{id:D20}`. The row holds the `RaftLogMessage` protobuf encoding, written and read by hand as `RocksDbWAL` does;
@@ -83,7 +83,7 @@ io_uring matches the default storage environment on synced writes, because their
 
 Some terms in this list:
 
-- The **commit frontier** is the highest committed log id of a partition. A commit marker is a small metadata put, not a rewrite of the row.
+- The **commit frontier** is the highest committed log id of a partition. A commit marker is a small metadata put. The row of the entry stays as it is.
 - The **compaction floor** is the log id below which the log is dead. The dead prefix is removed by the floor, a range delete in the active memtable, and whole-file drops with `DeleteFilesInRange`. See [Range Deletes](../guides/range-deletes.md#the-raft-log-pattern).
 
 `SolariumWAL` also fixes two bugs of `RocksDbWAL` at that commit. Kommander 1.12.0 made the same two fixes to `RocksDbWAL`. So neither fix is a difference from the release that `SolariumWAL` targets:
@@ -91,7 +91,7 @@ Some terms in this list:
 - **The header reader skips length-delimited fields correctly.** In the `RocksDbWAL` of 1.11.3, `ReadHeaderFromWire` and `ReadTermFromWire` skip a length-delimited field one byte short. Then a `Proposed` row with the log type `op` and a 32-byte payload reads with the first byte of the payload as its type, and the proposed-tail sweep can keep an uncommitted entry. `SolariumWAL` reads the length first, and refuses a length past the end of the row.
 - **The commit frontier never moves back under concurrent commits.** In the `RocksDbWAL` of 1.11.3, two commits of one partition that overlap can land in the opposite order. After a reopen, the commits that the higher advance absorbed read `Proposed`. `SolariumWAL` serializes the advances of each partition (see [Concurrency](#concurrency)).
 
-The rows and keys are the same bytes, but the files are those of Solarium. A `RocksDbWAL` directory does not open as a `SolariumWAL` directory, and the reverse is also true. To move a node from one to the other, copy the rows. This package does not do that for you.
+The rows and keys are the same bytes. The files are in the format of Solarium. A `RocksDbWAL` directory does not open as a `SolariumWAL` directory, and the reverse is also true. To move a node from one to the other, copy the rows. This package does not do that for you.
 
 ## Options
 
@@ -125,16 +125,16 @@ Appends to other partitions, and appends without commit markers, do not wait for
 
 ## After a storage failure
 
-A failed write stops every later write of a Solarium database until it opens again. `SolariumWAL` first looks at the kind of failure. Damage to the files is [corruption](#storage-damage), and a reopen does not repair it. For any other failure, it asks two questions:
+A failed write stops every later write of a Solarium database until it opens again. `SolariumWAL` first looks at the kind of failure. Damage to the files is [corruption](#storage-damage), and a reopen does not repair it. For any other failure, it makes two checks:
 
-1. Does the volume take a small durable write? It writes a probe file through the storage environment.
-2. Does the database take a write? It writes a canary put.
+1. It writes a probe file through the storage environment, to check that the volume takes a small durable write.
+2. It writes a canary put, to check whether the database takes a write.
 
-Only when the volume takes the write and the database does not, does `SolariumWAL` close the database and open it again. Then it retries the operation once.
+When the volume takes the write and the database does not, `SolariumWAL` closes the database and opens it again. Then it retries the operation once. In every other case, it does not reopen.
 
 - While the volume still refuses writes, for example because the disk is full, every write reports `Errored` and nothing reopens. Kommander retries on its own cadence.
 - A reopen that fails leaves the WAL closed. The next failed write tries again.
-- Nothing acknowledged is lost. Synced writes were flushed, and unsynced writes reached the operating system.
+- Every acknowledged write is still there. Synced writes were flushed, and unsynced writes reached the operating system.
 
 ```mermaid
 flowchart TD
@@ -153,19 +153,19 @@ A Raft node must not forget a vote, and must not lose a synced log entry without
 
 - **The term and vote are flushed before they count.** `SetMetaData`, and so `PersistHardState`, writes synced under `syncWrites`. A vote reply leaves after `PersistHardState` returns. `PersistHardState` also appends the term and vote to the hard-state ledger, and reports them durable only when both writes landed.
 - **The acknowledged-presence watermark.** `Write(logs, sync, acknowledgedPresence)` puts, in the batch of the rows, the highest id of each partition that the node will have reported as contiguously held. A truncation, the sweep of `Proposed` rows, and a truncating snapshot boundary clamp it. A snapshot boundary above the log raises it. A partition delete removes it. Kommander quarantines a partition whose restored log is shorter than its watermark.
-- **The sync ledger.** A WAL file cut after its fsync leaves no later record that proves the cut. So Solarium opens it short and clean, and the watermark, term, and vote inside it go with the rows. `.kommander-sync-ledger` holds the proof outside that file. After every synced write, before the write returns, it records the last sequence number of the batch (`WriteBatch.Sequence`) in one of two 512-byte slots, written in turn and each flushed.
+- **The sync ledger.** A WAL file cut after its fsync leaves no later record that proves the cut. So Solarium opens it short and clean, and the watermark, term, and vote inside it go with the rows. `.kommander-sync-ledger` holds the proof outside that file. After every synced write, before the write returns, it records the last sequence number of the write group that carried the batch (`WriteBatch.GroupLastSequence`) in one of two 512-byte slots, written in turn and each flushed. The writers of a group record one number between them, so a group costs at most one ledger flush.
 - **The verdict.** At open, a ledger ahead of what the database replayed is a lost-synced-writes verdict. The WAL persists it, and every partition carries it (`GetLostSyncedWritesReason`) until Kommander reconciles it from a leader (`MarkLostSyncedWritesReconciled`). The WAL keeps taking writes, because replication repairs a lost tail.
 - **The hard-state ledger.** `.kommander-hard-state` holds the last term and vote of each partition, appended after the put to the database. At open, a term or vote that it holds ahead of the database is written back before Kommander reads the hard state. A torn last record is cut. Past 256 KiB, the file is rewritten with one record for each partition.
 - **Fail-stop on damage.** A `SolariumException` with `IsCorruption`, from any read, write, reopen, or open, stops the WAL on purpose. It logs one Critical line and adds to `raft.wal.engine_fail_stops_total`. Every later write is refused as `Errored` without touching the database. The recovery neither probes nor reopens. `GetFailStopReason` names the damaged file. Reads continue, and a read of the damage throws again. An iterator throws at a damaged block, so no scan ends short as if the log ended there.
 
 Kommander then moves the partitions to `EngineFailed`, and a leader steps down. A restore that reads the damage reports `RestoreFailed`, which also withholds candidacy. A damaged open throws, so the node does not start.
 
-These are not a loss, and report no verdict: a ledger of another database (it is reset), a torn slot (the other slot is read), an unreadable ledger (it starts over with a warning), and a directory from before the ledgers (it is upgraded).
+These cases lose no data and report no verdict: a ledger of another database (it is reset), a torn slot (the other slot is read), an unreadable ledger (it starts over with a warning), and a directory from before the ledgers (it is upgraded).
 
 The limits:
 
 - **The ledger attests synced writes only.** With `syncWrites` off, nothing is attested after the open. With the default of Kommander, a batch of commit markers is written unsynced. A follower that first meets an entry already committed can write its row in such a batch and acknowledge it. A cut can then take only writes that were never synced, which no ledger can tell from a torn tail. The test of a repaired follower runs with `WalSingleFsyncCommit` off, so that every write is synced.
-- **Each synced write costs one more flush.** Concurrent writers share it: the first one through writes the target of all of them. The [benchmark results](../operations/benchmarks.md#the-kommander-wal-against-rocksdb) come before this flush.
+- **Each synced write group costs one more flush.** The first writer of the group through the gate writes the number, and the other writers find it written. `raft.wal.sync_ledger_flushes_total` counts these flushes. The [benchmark results](../operations/benchmarks.md#the-kommander-wal-against-rocksdb) come before this flush.
 - **The repair moves the ledgers too.** The repair for damage is to move the directory aside and let the node rebuild from its peers. The ledgers are in that directory, so the node then remembers neither its term nor its vote. The same is true of `RocksDbWAL`.
 - **Erased database files.** The database ignores files whose names start with `.`. So a directory whose database files were erased while the ledgers survived opens as a new database, with a verdict whose reason says that the format version is gone too.
 
@@ -193,6 +193,7 @@ builder.Services.AddOpenTelemetry().WithMetrics(metrics => metrics
 | `raft.wal.memtable_memory` | gauge, By | The bytes of the memtables of every column family, flushing ones included. |
 | `raft.wal.alive_log_bytes` | gauge, By | The bytes of the WAL files in the database directory, which a restart replays. |
 | `raft.wal.engine_reopens_total` | counter | Reopens of the database to clear a storage failure, tagged `outcome`: `success` or `failed`. |
+| `raft.wal.sync_ledger_flushes_total` | counter | Flushes of the sync ledger: one for each attestation written, at most one for each WAL write group. |
 | `raft.wal.engine_fail_stops_total` | counter | WALs that fail-stopped on storage damage, or refused to open on it. |
 | `raft.wal.lost_synced_writes_total` | counter | Opens whose sync ledger attested synced writes that the replayed log no longer holds. |
 
@@ -207,7 +208,7 @@ Each open `SolariumWAL` reports one measurement for each gauge, without tags, as
 - **A deleted WAL file is refused at open.** The manifest of Solarium lists every live WAL file, also the one in use. So the database refuses to open on a missing one, as corruption. `RocksDbWAL` tracks its closed logs only (`track_and_verify_wals_in_manifest`), opens on its tables alone when the live log is gone, and finds the loss through its sync ledger. In both, the sync ledger finds a cut WAL file.
 - **The ledger is bound at a synced mark.** At open, `RocksDbWAL` binds its ledger at the latest sequence number of the engine. With `syncWrites` off, that includes the unsynced metadata puts of the open, so a power loss right after the open reads as lost synced writes at the next one. `SolariumWAL` binds it at the sequence number of a synced canary write, which makes everything before it durable.
 - **The fail-stop reason names the damage.** A write that Solarium refuses after a compaction met damage says only that writes stopped. `GetFailStopReason` adds the messages of the failures that it wraps, which name the table and the offset. `RocksDbWAL` reports the status text, which names the file.
-- **The WAL file after a flush.** Solarium starts a new WAL file at the first write after a flush, not at the flush. So a closed WAL keeps its last file until then.
+- **The WAL file after a flush.** Solarium starts a new WAL file at the first write after a flush. So a closed WAL keeps its last file until then.
 
 ## Tests
 

@@ -23,7 +23,7 @@ db.Flush(log);               // waits until the data is durable in an SSTable
 db.Flush(log, wait: false);  // returns at once
 ```
 
-`Flush` makes the active memtable immutable at once. With `wait: true`, the default, it returns when that data is in an SSTable. The current WAL file changes at the next write group, not at once.
+`Flush` makes the active memtable immutable at once. With `wait: true`, the default, it returns when that data is in an SSTable. The current WAL file changes at the next write group.
 
 ## Compaction
 
@@ -44,7 +44,7 @@ flowchart TB
 
 The levels are sized dynamically, as with `level_compaction_dynamic_level_bytes` in RocksDB:
 
-- Level 6, the bottom level, holds what it holds.
+- Level 6, the bottom level, has no target size.
 - Each level above it has a target of one tenth (`MaxBytesForLevelMultiplier`) of the level below.
 - Level 0 compacts into the **base level**: the highest level whose target is still at most `MaxBytesForLevelBase` (256 MB).
 
@@ -69,7 +69,7 @@ using SolariumDb db = SolariumDb.Open("./data", new DbOptions { MaxBackgroundCom
 
 Two compactions never read the same file, never compact level 0 of one column family at the same time, and never write overlapping files into one level. So, for each key, the versions in a level stay newer than those in the levels below, as with one thread.
 
-More threads have a cost. In the compaction benchmark with random keys, 6 threads wrote 1.8 times the rows per second of RocksDB, and writes stalled for 0.5 s. But compaction wrote 4.63 times the bytes of the data. The threads also write at the same time, and on a slow drive they take it from synced writes. On a drive whose synced writes took 4 to 8 ms, 8 threads with no limiter made synced batches slower than one thread did. A [rate limiter](#pace-background-writes) gives the drive back. On a drive whose synced writes took about 1 ms, 8 threads with no limiter were faster than one. See [Benchmarks](../operations/benchmarks.md#concurrent-compactions).
+In the compaction benchmark with random keys, 6 threads wrote 1.8 times the rows per second of RocksDB, and writes stalled for 0.5 s. Compaction wrote 4.63 times the bytes of the data. The threads also write at the same time, and on a slow drive they take it from synced writes. On a drive whose synced writes took 4 to 8 ms, 8 threads with no limiter made synced batches slower than one thread did. A [rate limiter](#pace-background-writes) keeps a share of the drive for synced writes. On a drive whose synced writes took about 1 ms, 8 threads with no limiter were faster than one. See [Benchmarks](../operations/benchmarks.md#concurrent-compactions).
 
 `SolariumWAL`, the Kommander WAL, runs 6 compactions on 16 CPUs by default. `Solarium.Kahuna` keeps one, so that its synced writes stay fast.
 
@@ -91,7 +91,7 @@ How it works:
 
 - A flush or a compaction writes its SSTable through a 1 MiB buffer. Before each write of the buffer, it asks the limiter for those bytes. When the budget is spent, it waits.
 - The budget refills every 100 ms with the rate times the period. Flushes go before compactions. Every tenth refill serves the compactions first, so they always progress.
-- With a limiter, `BytesPerSync` is 1 MiB by default. After each 1 MiB, the writer starts the writeback of what it wrote (`sync_file_range` on Linux) and does not wait for it. So the table reaches the drive while it is written, not all at its last sync. `BytesPerSync` makes nothing durable. You can also set it without a limiter.
+- With a limiter, `BytesPerSync` is 1 MiB by default. After each 1 MiB, the writer starts the writeback of what it wrote (`sync_file_range` on Linux) and does not wait for it. So the table reaches the drive in steps while it is written. `BytesPerSync` makes nothing durable. You can also set it without a limiter.
 - The WAL, the manifest, checkpoints, and the flushes of the WAL replay at open are not paced.
 - One limiter can pace several databases on one drive. Pass the same instance to each `DbOptions`. `SetBytesPerSecond` changes the rate while the databases run.
 
@@ -100,7 +100,7 @@ The limiter paces flushes too. So choose a rate between two limits:
 - **Above what the store ingests.** Flushes must keep up with the writes. Below that rate, each memtable switch waits for a flush, and writes slow down.
 - **Below what the drive can write beside the WAL syncs.** Above that rate, the table writes take the drive from synced writes again.
 
-The benchmarks show both sides. On a drive whose synced writes took 4 to 8 ms, the synced batches wrote 11,000 to 13,000 rows per second. There, a limiter of 50 MiB/s brought 8 compaction threads back to the rate of one thread, and made the synced batches of 64 rows of Kahuna 2.5 to 3 times as fast. On the same drive at about 1 ms for each synced write, the batches wrote 50 to 65 MB/s. A limiter of 25 or 50 MiB/s was then below the ingest: every memtable switch waited for a flush, and the batches slowed to 0.2 to 0.4 times their rate with no limiter. See [Paced background writes](../operations/benchmarks.md#paced-background-writes).
+On a drive whose synced writes took 4 to 8 ms, the synced batches wrote 11,000 to 13,000 rows per second. There, a limiter of 50 MiB/s brought 8 compaction threads back to the rate of one thread, and made the synced batches of 64 rows of Kahuna 2.5 to 3 times as fast. On the same drive at about 1 ms for each synced write, the batches wrote 50 to 65 MB/s. A limiter of 25 or 50 MiB/s was then below the ingest: every memtable switch waited for a flush, and the batches slowed to 0.2 to 0.4 times their rate with no limiter. See [Paced background writes](../operations/benchmarks.md#paced-background-writes).
 
 The costs:
 

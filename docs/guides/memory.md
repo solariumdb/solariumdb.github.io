@@ -111,7 +111,7 @@ As the LRU cache of RocksDB, each shard of the cache keeps two pools:
 - The **high-priority pool** holds the index and filter partitions, and each entry read again after its insert. It holds up to `HighPriorityPoolRatio` of the shard, 0.5 by default.
 - The **low-priority pool** holds the other entries, for example data blocks read once.
 
-An eviction takes from the low-priority pool first. So the blocks of a long scan push out one another, not the indexes or the blocks that reads use often. `CacheIndexAndFilterBlocksWithHighPriority`, true by default, puts the partitions in the high-priority pool. To make the cache one plain LRU list, create it with `new Cache(capacity, highPriorityPoolRatio: 0)`.
+An eviction takes from the low-priority pool first. So the blocks of a long scan push out one another first. The indexes and the blocks that reads use often stay in the high-priority pool. `CacheIndexAndFilterBlocksWithHighPriority`, true by default, puts the partitions in the high-priority pool. To make the cache one plain LRU list, create it with `new Cache(capacity, highPriorityPoolRatio: 0)`.
 
 ### Reads that do not fill the cache
 
@@ -169,7 +169,7 @@ The memtables of a database can use a little more native memory than their size:
 - **Retired tables leave their data blocks.** When a compaction retires a table, its index and filter partitions leave the cache at once. Its data blocks stay until the cache evicts them, as in RocksDB. A database that closes erases all its entries from the cache.
 - **Old tables have one partition.** A table written before partitions, by an older version of Solarium, keeps one whole index and filter until a compaction rewrites it. A miss on it reads all of it, about 1 MB for a 64 MB table.
 - **A reader keeps what it took.** A read keeps the partition that it took after an eviction, until it is done. An iterator keeps the partition of each table that it reads, until it moves to another partition or you dispose it.
-- **The manager counts data, not allocations.** It counts the memtables as `rocksdb.cur-size-all-mem-tables` does. A memtable leaves the budget when its flush installs its table, even while an older reader still holds it. Its native memory goes when the last reader releases it.
+- **The manager counts the size of the data.** It counts the memtables as `rocksdb.cur-size-all-mem-tables` does. A memtable leaves the budget when its flush installs its table, even while an older reader still holds it. Its native memory goes when the last reader releases it.
 
 ## Related topics
 

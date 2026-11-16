@@ -9,7 +9,7 @@ Solarium is an embedded key-value store for .NET, written in managed code. Its d
 Solarium exists to be a durable log store for [Kommander](https://kahunakv.github.io/kommander.github.io/), the Raft library for .NET. It covers the part of RocksDB that the Raft log of Kommander uses, and RocksDB is the reference behavior. A host can plug Solarium into Kommander in place of RocksDB, with no native library.
 
 :::note A young database
-Solarium is a brand-new database, at version 0.1.7. Its on-disk format can still change. Read [What is not done yet](#what-is-not-done-yet) before you use it for data that you cannot lose.
+Solarium is a brand-new database, at version 0.2.1. Its on-disk format can still change. Read [What is not done yet](#what-is-not-done-yet) before you use it for data that you cannot lose.
 :::
 
 ## In simple terms
@@ -44,7 +44,7 @@ This design makes writes fast, because a write is one append and one insert in m
 | **Column families** | Named, ordered key spaces in one database, like separate tables in one SQLite file. They share one WAL, so one batch can write to several of them atomically. |
 | **Atomic write batches** | A `WriteBatch` applies all its puts, deletes, and range deletes, or none of them, like a transaction that only writes. |
 | **Synced and unsynced writes** | A synced write survives a power loss when `Write` returns. An unsynced write survives a process crash. |
-| **Range deletes** | `DeleteRange` deletes a key range with one range tombstone, not one delete for each key. |
+| **Range deletes** | `DeleteRange` deletes a key range with one write: a single range tombstone covers the whole range. |
 | **Ordered iterators** | Seek, step forward, step back, and stop at an upper bound. |
 | **Leveled compaction** | The seven levels of RocksDB, with its dynamic level sizing. |
 | **Checkpoints** | A consistent copy of the database in a new directory, with hard links to the SSTables. |
@@ -116,7 +116,7 @@ db.DeleteRange("log:0000"u8, "log:0001"u8);
 
 | If you want to | Read |
 | --- | --- |
-| Know why Solarium exists and when to use it | [Why Solarium](why-solarium.md) |
+| Know why Solarium exists and when to use it | [Benefits and Limits](why-solarium.md) |
 | Learn the storage terms that these docs use | [Key Concepts](concepts.md) |
 | Open a database and write your first batch | [Getting Started](getting-started.md) |
 | Use Solarium as the Raft log of Kommander | [Solarium.Kommander](integrations/kommander.md) |

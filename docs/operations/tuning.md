@@ -29,10 +29,10 @@ By default, the page cache of the operating system caches the data blocks. `Cach
 | Higher `Level0FileNumCompactionTrigger` | Fewer, larger compactions of level 0. | Reads search more level 0 files. |
 | Higher slowdown and stop triggers | Fewer write stalls in a burst. | More level 0 files, and slower reads during the burst. |
 | `Compression = Lz4` | Fewer bytes to write. In the Kahuna benchmark, loads were 1.3 to 1.7 times as fast. | CPU to compress, and to decompress on each read of a block. |
-| Many writer threads | Group commit shares the WAL appends and flushes. | None. More writers usually means more throughput. |
+| Many writer threads | Group commit shares the WAL appends and flushes. More writers usually give more throughput. | None. |
 | Higher `MaxBackgroundCompactions` | Level 0 stays lower, and writes stall less. | More bytes written. On a large store, slower synced writes, unless a `RateLimiter` paces the compactions. |
 | A `RateLimiter` | Synced writes keep their share of the drive while flushes and compactions run. | The merges take longer after a burst. Too low a rate lets level 0 grow until writes stall. |
-| `BytesPerSync` | Each SSTable reaches the drive while it is written, not all at its last sync. | Little. In the benchmark, the rate of synced writes changed by -5% to +18%, within the spread of the compactions. |
+| `BytesPerSync` | Each SSTable reaches the drive in steps while it is written. | Little. In the benchmark, the rate of synced writes changed by -5% to +18%, within the spread of the compactions. |
 
 [Pace background writes](../guides/flushes-and-compaction.md#pace-background-writes) explains how to choose a rate for your drive.
 
@@ -44,7 +44,7 @@ The Kommander WAL uses this tuning for its shard column families: 128 MiB memtab
 - Keep the data in the page cache when you can. By default, data blocks have no cache in the process, so a read of a block that is not in the page cache goes to the drive.
 - When the data that your reads use fits in a block cache, try `CacheDataBlocks`. Measure it: on a store ten times the cache, it made reads slower.
 - With a block cache, size it to hold every index and filter partition, and pin level 0 with `PinL0FilterAndIndexBlocksInCache`.
-- Read many keys with `MultiGet`, not one `Get` for each key. It reads their data blocks in one batch.
+- Read many keys with one `MultiGet` call. It reads their data blocks in one batch.
 - Prefer `Next` to `Prev`. A `Prev` step searches every source.
 - Dispose iterators quickly, so that compaction can delete old files.
 
@@ -56,7 +56,7 @@ Lower it when a restart must be fast. The open replays every live WAL file.
 
 ## Write stalls
 
-`DbOptions.DelayedWriteRate` (16 MiB/s by default) is the rate that writes slow down to at the slowdown trigger. It is fixed: RocksDB changes it with the compaction backlog, and Solarium does not. See [Write Stalls](write-stalls.md).
+`DbOptions.DelayedWriteRate` (16 MiB/s by default) is the rate that writes slow down to at the slowdown trigger. The rate is fixed. RocksDB changes it with the compaction backlog. See [Write Stalls](write-stalls.md).
 
 ## Group size
 

@@ -18,11 +18,11 @@ Your hardware, your kernel, and your workload give other numbers. Run the benchm
 
 These results come before the checks of each data block against its index entry. When those checks were added, uncached `Get` operations on a store in memory ran about 4% slower than without them. The suites did not run again after that. See [SSTables](../architecture/sstables.md#how-a-table-proves-its-place).
 
-The Kommander results also come before the [storage-damage contract](../integrations/kommander.md#storage-damage) of `SolariumWAL`. It adds one flush of its sync ledger for each synced write, shared by concurrent writers, and it writes the term and vote synced. Its cost was not measured.
+The Kommander results also come before the [storage-damage contract](../integrations/kommander.md#storage-damage) of `SolariumWAL`. It adds one flush of its sync ledger for each synced write group, and it writes the term and vote synced. Its cost against RocksDB was not measured.
 
 Before 2026-10-29, synced writes on this drive took 4 to 8 ms. So the synced rates in older results are 2 to 5 times lower than here. The ratios between the engines carry over.
 
-The GC changes the result of a change. Under the workstation GC, the default of BenchmarkDotNet, collections took 20% to 29% of an unsynced `Put`. Under the server GC, they took 7% to 9%. A change that wins under one GC can lose under the other.
+The GC changes the result of a change. Under the workstation GC, the default of BenchmarkDotNet, collections took 20% to 29% of an unsynced `Put`. Under the server GC, they took 7% to 9%. A change can be faster under one GC and slower under the other.
 
 ## The projects
 
@@ -89,11 +89,34 @@ On a memtable of 921,600 entries:
 
 | | Time | Allocated |
 | --- | ---: | ---: |
-| `Get` | 799 ns | 208 B |
+| `Get` | 799 ns | 152 B |
 | Iterator `Next` | 19.9 ns | 0 B |
-| Iterator `Prev` | 296 ns | 320 B |
+| Iterator `Prev` | 296 ns | 264 B |
 
-A memtable node and its key are one place in its native arena, so each step of a search reads one place. The iterator copies each position into buffers that it reuses, so `Next` allocates nothing.
+A memtable node and its key are one place in its native arena, so each step of a search reads one place. The iterator copies each position into buffers that it reuses, so `Next` allocates nothing. A `Get` allocates its value and no copy of its key.
+
+### Table reads and compaction
+
+These two benchmarks ran on a development machine: macOS on Apple silicon, with the file in the page cache. This is not the machine of the other results.
+
+`TableReadBenchmarks` reads 921,600 entries from one SSTable that a flush wrote. `GetMissing` asks for keys inside the range of the table that are not there, which the Bloom filter answers. `IteratorNext` steps over 65,536 rows. The data blocks come from the file, or from a block cache that holds the whole table (`CacheDataBlocks`):
+
+| | Time, file | Time, cached | Allocated |
+| --- | ---: | ---: | ---: |
+| `Get` | 1,115 ns | 371 ns | 152 B |
+| `GetMissing` | 97 ns | 89 ns | 0 B |
+| `IteratorNext` | 38 ns | 26 ns | 0 B |
+
+A table cursor reads each key and value in place, and reads the file ahead, so a step of a scan allocates nothing. When the cursor copied each entry into new arrays and read one block at a time, a step took 69 ns from the file and 44 ns from the cache, and allocated 208 bytes. When the iterator asked every source about range tombstones, a step took 44 ns and 31 ns.
+
+`CompactRangeBenchmarks` times one manual compaction and one flush. Each iteration builds a store from 1,000,000 `Put` operations of a 31-byte key and a 128-byte value, with keys drawn at random from 500,000, in four level 0 tables. The compaction merges them, and the flush writes the last quarter. The median of 10 runs, with the flush of the output to the drive:
+
+| | Time, no compression | Time, LZ4 | Allocated |
+| --- | ---: | ---: | ---: |
+| `CompactRange` | 103 ms | 99 ms | 7.4 MB |
+| `Flush` | 45 ms | 46 ms | 2.8 MB |
+
+With an array for each key and value, the compaction took 113 ms and 109 ms and allocated 163 MB, and the flush took 53 ms and 52 ms and allocated 42 MB. With the readahead of 2 MiB of RocksDB, the merge without compression took 144 ms, because four windows of that size do not fit in a processor cache. The `compaction random` scenario showed no difference outside its noise, because its time is that of the writers.
 
 Live keys beside range tombstones, which the memtable or the SSTable keeps in fragments:
 
@@ -181,7 +204,7 @@ It measures `RocksDbWAL` from Kommander 1.11.3, and `SolariumWAL` on the default
 - `batch`: 64 entries for each `Write`, as a follower appends a replicated batch.
 - `mixed`: an append and its commit for each entry, a checkpoint and a compaction pass every 1,000 entries, and one reader thread for each 4 writers. A reader reads the last 64 entries of a random partition.
 
-Synced cases ran on the drive. Unsynced cases ran on tmpfs (`--dir /dev/shm`), so that they measure the CPU cost and not the writeback of the disk. Entries per second, the median of three repeats:
+Synced cases ran on the drive. Unsynced cases ran on tmpfs (`--dir /dev/shm`), so that they measure the CPU cost without the writeback of the disk. Entries per second, the median of three repeats:
 
 | Case | RocksDB | Solarium | Solarium, io_uring | Solarium / RocksDB |
 | --- | ---: | ---: | ---: | ---: |
@@ -271,7 +294,7 @@ Operations per second (rows for writes and scans, keys for batched reads), or se
 
 What the results show:
 
-- **Reads from the page cache beat RocksDB, with no cache of data blocks.** Solarium made 1.05 to 1.8 times the gets and scans of `rocksdb-buffered` on `large`, 1.4 to 1.95 times on `history`, and 0.93 to 1.35 times on `small`. Misses on `small` and `history` are the exception, at 0.68 to 0.99 times. Part of those small stores is probably still in memtables, which Solarium replays from its WAL at open, where RocksDB flushes them. That was not measured.
+- **Reads from the page cache are faster than RocksDB on `large` and `history`, with no cache of data blocks.** Solarium made 1.05 to 1.8 times the gets and scans of `rocksdb-buffered` on `large`, 1.4 to 1.95 times on `history`, and 0.93 to 1.35 times on `small`. Misses on `small` and `history` are the exception, at 0.68 to 0.99 times. Part of those small stores is probably still in memtables, which Solarium replays from its WAL at open, where RocksDB flushes them. That was not measured.
 - **io_uring reads as fast as the default storage environment**, except misses from 8 threads on `large`, at 0.8 times. Its reads are `pread` calls on the calling thread.
 - **The RocksDB defaults of Kahuna lose on every read that misses the block cache.** With direct reads, each such block comes from the drive.
 - **Writes are faster.** Synced writes of one row are bound by the drive on every engine. Larger synced batches, and loads, ran 1.07 to 1.32 times as fast as `rocksdb-buffered`. Solarium wrote fewer bytes for each row than RocksDB.

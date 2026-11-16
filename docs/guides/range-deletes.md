@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Range Deletes
 
-A range delete removes every key in a range with one write. A Raft log uses it to drop the dead prefix of the log: millions of old entries go away without one delete for each entry.
+A range delete removes every key in a range with one write. A Raft log uses it to drop the dead prefix of the log: millions of old entries go away with one write.
 
 Solarium has three ways to remove a range of keys. They differ in cost and in what they guarantee. Kommander combines all three.
 
@@ -32,7 +32,7 @@ db.Write(new WriteBatch()
 - An end key before the begin key throws `ArgumentException` when you add it to the batch.
 - A put of a key in the range after the range delete is visible again, because it is newer than the tombstone.
 
-Range tombstones cost reads very little. Each read checks the tombstones that can cover its key, and Solarium indexes them so that the check stays fast with thousands of tombstones. On the benchmark machine (a 13th Gen Intel Core i7-13620H on Linux), a `Get` in a memtable with 8,192 tombstones took 204 ns, against 164 ns with none. [Memtable](../architecture/memtable.md) explains the index.
+Range tombstones add little time to reads. Each read checks the tombstones that can cover its key, and Solarium indexes them so that the check stays fast with thousands of tombstones. On the benchmark machine (a 13th Gen Intel Core i7-13620H on Linux), a `Get` in a memtable with 8,192 tombstones took 204 ns, against 164 ns with none. [Memtable](../architecture/memtable.md) explains the index.
 
 ## DeleteFilesInRange
 
@@ -63,7 +63,7 @@ db.CompactRange("log:0000"u8.ToArray(), "log:5000"u8.ToArray(), log);
 - It does not flush a memtable that overlaps the range first. Call `Flush` first if the memtable holds data in the range.
 - It does not rewrite level 6 files alone. Only files that a level above overlaps are rewritten.
 
-`CompactRange` can write a lot of data. Use it for maintenance, not on every write.
+`CompactRange` can write a lot of data. Call it for maintenance tasks only.
 
 ## The Raft log pattern
 

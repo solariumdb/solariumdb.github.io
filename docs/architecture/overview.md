@@ -90,7 +90,7 @@ A version never changes after it is published. A memtable switch, a finished flu
 
 Reads take none of these locks. A block cache has a lock for each of its shards, and a lookup in the cache takes one of them.
 
-## Where Solarium follows RocksDB, and where it does not
+## RocksDB design and differences
 
 The design follows RocksDB in each part: group commit with pipelined writes, the skip-list memtable, the `SuperVersion`, leveled compaction with dynamic level sizing, a rate limiter for flush and compaction writes, fragmented range tombstones, and the property names. The main differences are:
 

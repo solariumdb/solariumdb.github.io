@@ -16,11 +16,11 @@ The memtable follows the LevelDB design:
 - A node is fully built before a release-store or a compare-and-swap links it in.
 - Nodes are never removed while the memtable lives. So a reader can walk the list while writers insert.
 
-A reader sees a consistent state through sequence numbers, not through the list. The database publishes the last sequence number of a group only after every entry of the group is in. A reader skips entries newer than its snapshot.
+A reader gets a consistent state from sequence numbers. The database publishes the last sequence number of a group only after every entry of the group is in. A reader skips entries newer than its snapshot.
 
 ## Concurrent inserts
 
-The memtable takes either one writer at a time, or the writers of one group at once, never both:
+The memtable takes either one writer at a time, or the writers of one group at once. The two modes never run at the same time:
 
 - **One writer** links each new node in with a release-store.
 - **Several writers** each link their own nodes with a compare-and-swap at each level, from the bottom level up. When a link changed under a writer, it searches only that level again. This is how the `InlineSkipList::InsertConcurrently` of RocksDB works.
@@ -37,7 +37,7 @@ The skip list lives in **native memory**, outside the managed heap, as the `Inli
 
 The garbage collector sees no entry. No collection copies or marks the memtable, and the memtable does not count against the heap limit of the GC.
 
-The size of a memtable counts its nodes: each key and value, a 24-byte header, and 8 bytes for each level of links, rounded up to 8. It also counts the fragments of its range tombstones. When the size reaches `WriteBufferSize`, the memtable becomes immutable at the next write group. A `WriteBufferManager` counts the same size, across databases. After the inserts of each group, the leader of the stage charges the bytes that the group added, once for each group and not for each entry.
+The size of a memtable counts its nodes: each key and value, a 24-byte header, and 8 bytes for each level of links, rounded up to 8. It also counts the fragments of its range tombstones. When the size reaches `WriteBufferSize`, the memtable becomes immutable at the next write group. A `WriteBufferManager` counts the same size, across databases. After the inserts of each group, the leader of the stage charges the bytes that the group added, once for each group.
 
 The chunks of a flushed memtable go back to a pool: that of the `WriteBufferManager`, or one that the databases without a manager share. The pool keeps them for the next memtables while the chunks that it holds stay within the memtable budget. So a new memtable writes to pages that are mapped already. Besides the budget, the process holds at most one partly used chunk for each processor and memtable.
 
@@ -63,7 +63,7 @@ flowchart TB
 
 ### In the memtable: runs that double
 
-The tombstones of a memtable change with each range delete. RocksDB caches the fragments of all of them until the next range delete, so the first read after each range delete fragments them all again. With 8,192 tombstones, that read pays for 8,192 tombstones.
+The tombstones of a memtable change with each range delete. RocksDB caches the fragments of all of them until the next range delete, so the first read after each range delete fragments them all again. With 8,192 tombstones, that read fragments all 8,192.
 
 Solarium makes the writer build the fragments instead, in **runs**:
 
@@ -72,7 +72,7 @@ Solarium makes the writer build the fragments instead, in **runs**:
 3. It merges into the new run the runs before it that are no larger, as a binary counter carries.
 4. So the runs have sizes of 8, 16, 32, and more tombstones, one of each size at most.
 
-A lookup searches each run with a binary search, and scans the fewer than 8 tombstones past the last run. No reader builds anything.
+A lookup searches each run with a binary search, and scans the fewer than 8 tombstones past the last run. Readers only search.
 
 The cost moves to the writer: each tombstone takes part in one build each time the count of tombstones doubles. The largest build, of all the tombstones, comes on the range delete that makes the count 8 times a power of two.
 
@@ -80,7 +80,7 @@ In the benchmarks, a pair of one `DeleteRange` and one `Get` or `Seek` costs 3 t
 
 ### Concurrent range deletes
 
-When several writers of a group add range deletes at once, the range deletes go to a copy-on-write array under a small lock, not to a second skip list.
+When several writers of a group add range deletes at once, the range deletes go to a copy-on-write array under a small lock. RocksDB keeps them in a second skip list.
 
 ## After a flush
 

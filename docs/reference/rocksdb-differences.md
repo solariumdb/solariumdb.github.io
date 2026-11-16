@@ -4,7 +4,7 @@ sidebar_position: 5
 
 # Differences from RocksDB
 
-RocksDB is the reference behavior. A deliberate difference is on this page, and an accidental difference is a bug. The RocksDB behavior that these documents describe is checked against RocksDB 11.8.1. The `Kommander.RocksDB` package that the benchmarks run (11.8.1.9002) carries a native library built from that release.
+RocksDB is the reference behavior. This page lists every deliberate difference. Any other difference is a bug. The RocksDB behavior that these documents describe is checked against RocksDB 11.8.1. The `Kommander.RocksDB` package that the benchmarks run (11.8.1.9002) carries a native library built from that release.
 
 ## Scope
 
@@ -28,7 +28,7 @@ Solarium covers the part of RocksDB that the Raft log of Kommander and the backe
 - **A block checksum** is a CRC-32 with the context checksum modifier of RocksDB (`format_version` 6) mixed in: the table id folded to 32 bits, XOR the sum of the halves of the block offset. The checksum of RocksDB is CRC32c or XXH3, and its base is a value for each file in its footer.
 - **The manifest records each table id.** An open compares the id, the size, the entry count, the sequence numbers, and the key range with the table file. RocksDB compares a table unique id with its manifest (`verify_sst_unique_id_in_manifest`), and its file size.
 - **A read checks each data block against its index entries**, by its first and last keys. RocksDB does not. So a misplaced block is corruption also in a table without context checksums.
-- **The WAL file** has its own header and a version, not the 32 KB blocks of RocksDB. Each WAL record carries the offset of the file that a flush made durable. Recovery uses it to tell power-loss damage from damage to flushed data. The WAL of RocksDB has no such field, so its recovery modes either fail the open after such a power loss or drop data after any damage.
+- **The WAL file** has its own header and a version. RocksDB writes its WAL in 32 KB blocks. Each WAL record carries the offset of the file that a flush made durable. Recovery uses it to tell power-loss damage from damage to flushed data. The WAL of RocksDB has no such field, so its recovery modes either fail the open after such a power loss or drop data after any damage.
 
 ## Compression and caching
 
@@ -58,13 +58,14 @@ Solarium covers the part of RocksDB that the Raft log of Kommander and the backe
 - **File selection.** A level 0 merge picks the oldest file first, as in RocksDB. A merge of a sorted level takes one file chosen by `kMinOverlappingRatio`, with no expansion to more files of the level, and without the checks of RocksDB on the overlap two levels down (`max_compaction_bytes`, the grandparent overlap).
 - **Trivial moves.** A move from level 0 can take several files at once. RocksDB moves several level 0 files only into a level that has files, and one file into any level.
 - **Range tombstone bounds.** A range tombstone is cut at the boundaries between the output files of a merge, with a user key as the excluded bound, which the table records. RocksDB bounds files with internal keys and a sentinel.
+- **Readahead is fixed.** A compaction reads 256 KiB of an input file at a time, and there is no option for it. The `compaction_readahead_size` of RocksDB is 2 MiB. With 2 MiB, a merge of tables in the page cache took a quarter longer. An iterator reads ahead as the iterators of RocksDB do, from 8 KiB up to 256 KiB, with no `readahead_size` option.
 - **Sequence numbers.** A merge keeps the sequence numbers of the entries that it writes. RocksDB sets them to 0 in the bottom level.
 - **`CompactRange`** does not flush a memtable that overlaps the range first.
 
 ## Memtable budget
 
 - **The `WriteBufferManager` never stalls writes** (`allow_stall`). Over the cap, the writing database flushes its column family with the oldest memtable. It never flushes the memtables of another database.
-- **It counts data, not allocations.** It counts the memtables as `cur-size-all-mem-tables` does, not the arena blocks that they allocate. The native memory of a memtable goes with the last version or flush that holds it, as in RocksDB.
+- **It counts the size of the data.** It counts the memtables as `cur-size-all-mem-tables` does. RocksDB counts the arena blocks that they allocate. The native memory of a memtable goes with the last version or flush that holds it, as in RocksDB.
 - **Cache charges.** With a cache, it charges the memtables in pinned entries of 256 KiB, as the `CacheReservationManager` of RocksDB. It gives them back as soon as the memory falls. RocksDB keeps them until the memory falls below three quarters of the reservation.
 - **The check can trail.** Each write group charges its memtable bytes after its inserts. While commits are pipelined, the check before a group can miss the groups still in their memtable stage.
 - **Replay.** The WAL replay at open charges what it inserts, and flushes only at `WriteBufferSize`, as the recovery of RocksDB. So the first write after an open past the cap flushes.
@@ -109,17 +110,17 @@ Solarium covers the part of RocksDB that the Raft log of Kommander and the backe
 ## Memory figures
 
 - `cur-size-all-mem-tables` counts the nodes of each memtable in its native arena: each key and value, a 24-byte header, and 8 bytes for each skip-list level, rounded up to 8. It also counts the range tombstones and their fragments. An empty memtable is 0. RocksDB counts the arena blocks that it allocated, 2 KB for an empty memtable. The arena also holds at most one partly used chunk of 64 KiB for each processor that wrote to the memtable.
-- `estimate-table-readers-mem` counts the index keys and handles, the filter bits, and the range tombstones and their fragments of each open table, not its allocations. With `CacheIndexAndFilterBlocks`, it counts the range tombstones and their fragments only, as that of RocksDB leaves out the cached blocks.
+- `estimate-table-readers-mem` counts the index keys and handles, the filter bits, and the range tombstones and their fragments of each open table. With `CacheIndexAndFilterBlocks`, it counts the range tombstones and their fragments only, as that of RocksDB leaves out the cached blocks.
 
 ## Group commit
 
-- **The WAL file after `Flush`** changes at the next write group, not at once.
+- **The WAL file after `Flush`** changes at the next write group.
 - **Commits are pipelined by default.** The `enable_pipelined_write` of RocksDB is off by default. In the `Put` benchmarks, pipelining makes 3 to 16 unsynced writers 5% to 15% faster, and 16 writers beside 16 readers 11% faster. It costs a single writer 1.5% to 1.7%. At 2 writers, the result changes with the build, from 8% faster to 7% slower. Because a group gives up its leadership after its WAL append, a full memtable is switched one group later than without pipelining, as in RocksDB.
 - **Concurrent memtable inserts.** In a group of several writers, the leader launches the inserts of the members that still spin, and inserts the batches of the blocked members itself. RocksDB launches every member. A blocked member must wake and get a CPU before it can insert. Where most waiting writers block, as on io_uring or beside readers, a launch for every member made writes up to 2.8 times slower (5.5 times beside 16 readers) than inserts by the leader alone.
 - **Publication.** The leader waits for the last insert and publishes the group. In RocksDB, the last writer to finish its insert publishes the group. The leader of Solarium holds the lock that keeps `Flush` from switching a memtable during the inserts, and that lock belongs to its thread. The `Flush` of RocksDB waits in the write queue instead.
 - **Wakes.** The leader of RocksDB wakes the writers of a group of 20 or more through about √n of them. The leader of Solarium wakes each one.
-- **Concurrent range deletes** go to a copy-on-write array under a small lock, not to a second skip list.
-- **The offer of leadership is not a hand-off.** A writer that arrives while no leader is active takes the queue and leads it. The writer that got the offer then waits for that group. A running writer starts the next group sooner than a blocked writer can wake up.
+- **Concurrent range deletes** go to a copy-on-write array under a small lock. RocksDB keeps them in a second skip list.
+- **A new writer can lead before the writer that got the offer.** A writer that arrives while no leader is active takes the queue and leads it. The writer that got the offer then waits for that group. A running writer starts the next group sooner than a blocked writer can wake up.
 
 ## Writer spin
 
@@ -127,11 +128,11 @@ A writer that waits for its group spins for up to 20 µs before it blocks, or fo
 
 RocksDB writers spin for about 1 µs (200 pause loops). Then, with `enable_write_thread_adaptive_yield` (on by default), they call `sched_yield` for up to `write_thread_max_yield_usec` (100 µs by default). They block after 3 yields that each take `write_thread_slow_yield_usec` (3 µs by default) or more. A credit, updated on one wait in 256, decides whether a writer yields at all.
 
-Solarium has no yields. In the `Put` benchmarks, yields after 1 µs or 5 µs made 16 writers on 16 CPUs 8% to 10% slower than a spin without yields. Solarium keeps the sampled credit of RocksDB, with the same decay of 1/1024. But the credit chooses between a spin of 20 µs and one of 1 µs, and it stops the long spin when more than about a quarter of the probes block, not half.
+Solarium has no yields. In the `Put` benchmarks, yields after 1 µs or 5 µs made 16 writers on 16 CPUs 8% to 10% slower than a spin without yields. Solarium keeps the sampled credit of RocksDB, with the same decay of 1/1024. But the credit chooses between a spin of 20 µs and one of 1 µs, and it stops the long spin when more than about a quarter of the probes block. RocksDB uses half.
 
 Other details of the spin:
 
-- While the spin is short, Solarium probes in windows of long spins, not one wait at a time as RocksDB does. On macOS (8 CPUs, 16 writers), single probes among short spins blocked 45% of the time, where a fixed 20 µs spin blocked 3%. So the spin stayed short, and each `Put` took about twice as long.
+- While the spin is short, Solarium probes in windows of long spins. RocksDB samples one wait at a time. On macOS (8 CPUs, 16 writers), single probes among short spins blocked 45% of the time, where a fixed 20 µs spin blocked 3%. So the spin stayed short, and each `Put` took about twice as long.
 - The credit of RocksDB starts at 0, so one early block stops its yields. The credit of Solarium starts 16 blocks above 0. On Linux, with six writers on one thread for each core on io_uring, a credit that started at 0 made 28% to 38% of the turns spin short, where a fixed 20 µs spin blocked on 12%.
 - In the benchmarks, the long spin was faster where 13% or fewer of its spins blocked, and slower where 40% or more blocked.
 - With 16 readers beside 16 writers on 16 CPUs, the long spin costs the readers about 8% of their `Get` calls. Only 2% of its spins block there, so the credit keeps it.

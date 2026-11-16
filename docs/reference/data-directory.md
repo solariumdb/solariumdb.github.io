@@ -13,7 +13,7 @@ A Solarium database is one directory. This page lists the files in it and what e
 | `MANIFEST` | The live WAL files, the column families, their SSTables with the level of each, and the flush point of each column family. |
 | `NNNNNN.log` | A WAL file. |
 | `NNNNNN.sst` | An SSTable. |
-| `.*` | A file of an application, never of the database. See [Application files](#application-files). |
+| `.*` | A file that belongs to an application. Solarium writes no such file. See [Application files](#application-files). |
 
 ## LOCK
 
@@ -66,4 +66,4 @@ A file whose name starts with `.` belongs to an application. Solarium writes non
 
 ## Orphan files
 
-A crash during a flush or a compaction can leave SSTables that the manifest does not list. The next open deletes them.
+A crash during a flush or a compaction can leave SSTables that the manifest does not list, and temporary files of the database. The next open deletes them. It keeps a temporary file of an application, whose name starts with `.`, because the application can be in the middle of a replacement.

@@ -56,13 +56,14 @@ The open also fails for damage that no crash explains:
 
 - damage in an **older** WAL file;
 - a **gap** in the sequence numbers;
-- a WAL file that the manifest lists but that is **missing**.
+- a WAL file that the manifest lists but that is **missing**;
+- **too many bad records** after the damage. A record can start at any byte after the damage, so the search for an intact record has a limit: it checksums at most four times the bytes after the damage, plus 64 MiB. A crash does not leave more records with bad checksums than that.
 
 A version 1 file keeps the rule that it was written under: any damage with data after it, other than the end of a record or zeros, fails the open.
 
 At the end of the open, a manifest save records the tables that the replay wrote, and a new WAL file starts.
 
-## The case that can drop a synced write
+## Damage in the last synced group
 
 The cut can drop a synced write only when flushed data was damaged in a way that no crash causes, and no record was written after it. That is damage inside the last synced group of the file, with nothing appended since. Then nothing in the file shows that the group was flushed.
 

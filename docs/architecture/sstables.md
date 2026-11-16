@@ -57,9 +57,9 @@ Each block is followed by the checksum of its payload. A data block also has the
 - **The versions of one key can span blocks and partitions**, because each index holds last internal keys. A key whose versions continue into the next partition is in both filters.
 - **Exclusive largest bound.** A table records when its largest bound is the end of a range tombstone that none of its entries has. Then two tables of a level can meet at that key without overlapping. See [Compaction](compaction.md#the-merge).
 
-## How a table proves its place {#how-a-table-proves-its-place}
+## Checks of table and block placement {#how-a-table-proves-its-place}
 
-A plain CRC-32 shows that the bytes of a block are whole. It does not show that the block is at the right place. A write that went to the wrong offset leaves a block that passes its CRC-32. Then a read can search the wrong keys and answer "not found". Version 5 of the table format closes this gap in three ways:
+A plain CRC-32 shows only that the bytes of a block are whole. A write that went to the wrong offset leaves a block that passes its CRC-32. Then a read can search the wrong keys and answer "not found". Version 5 of the table format closes this gap in three ways:
 
 - **Checksums are bound to the table and the offset.** Each table has a random nonzero 64-bit id in its footer. The stored checksum of a block is its CRC-32 XOR a modifier of the id and the offset of the block, as the context checksum of RocksDB. So a block copied from another place or another table fails its checksum. The CRC-32 of the footer has no modifier, because it covers the id.
 - **The manifest records each table.** An open compares the id, the size, the entry count, the sequence numbers, and the key range with the file. So a table file that another valid table replaced fails the open.
@@ -83,7 +83,7 @@ A failed check throws `SolariumException` with `IsCorruption` set. [Durability](
 When a table opens, it reads and verifies every partition. It keeps in memory:
 
 - the top-level index, about 0.04% of the table bytes;
-- the index and filter partitions, about 2% of the table bytes and 4% with LZ4, which shrinks the data but not the keys. With `CacheIndexAndFilterBlocks`, they go to the block cache instead;
+- the index and filter partitions, about 2% of the table bytes and 4% with LZ4, because LZ4 shrinks the data blocks and leaves the index keys at full size. With `CacheIndexAndFilterBlocks`, they go to the block cache instead;
 - the range tombstones, cut into fragments that do not overlap. With 8 tombstones or fewer, it scans them instead, which costs less than the build.
 
 Each index is decoded into a few arrays: one of the last keys laid end to end, one of where each key starts, and one each of the sequence numbers, offsets, and sizes. So an index is five objects, whatever its number of blocks. One array for each key made a long-lived object for every 4 KB of data.

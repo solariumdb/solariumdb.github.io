@@ -46,7 +46,7 @@ The options of one column family.
 | `Compression` | `None` | How new SSTables store their data blocks: `None` or `Lz4`. Old tables keep their own compression. | `compression`. The default of RocksDB is Snappy. |
 | `BlockCache` | `null` | The cache for the blocks of the SSTables: the index and filter blocks with `CacheIndexAndFilterBlocks`, and the data blocks with `CacheDataBlocks`. Several column families and databases can share one. See [Cache](#cache). | `BlockBasedTableOptions::block_cache` |
 | `CacheDataBlocks` | `false` | Keeps the data blocks that reads take in `BlockCache`, verified and decompressed. Compactions never fill it. Needs a `BlockCache`. See [Cache data blocks](../guides/memory.md#cache-data-blocks). | None. RocksDB caches data blocks whenever it has a block cache. |
-| `CacheIndexAndFilterBlocks` | `false` | Keeps the index and filter partitions of each SSTable in `BlockCache`, not in the memory of the table. Needs a `BlockCache`. | `cache_index_and_filter_blocks` |
+| `CacheIndexAndFilterBlocks` | `false` | Keeps the index and filter partitions of each SSTable in `BlockCache`. Without it, the table keeps them in its own memory. Needs a `BlockCache`. | `cache_index_and_filter_blocks` |
 | `PinL0FilterAndIndexBlocksInCache` | `false` | Pins the index and filter partitions of level 0 tables in `BlockCache` while they are in level 0. Only with `CacheIndexAndFilterBlocks`. | `pin_l0_filter_and_index_blocks_in_cache` |
 | `CacheIndexAndFilterBlocksWithHighPriority` | `true` | Puts the index and filter partitions in the high-priority pool of `BlockCache`, so the cache evicts data blocks read once before them. Only with `CacheIndexAndFilterBlocks`. | `cache_index_and_filter_blocks_with_high_priority` |
 

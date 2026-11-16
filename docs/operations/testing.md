@@ -4,7 +4,7 @@ sidebar_position: 6
 
 # Testing
 
-The tests of a storage engine must prove two things: that it gives the right answers, and that it keeps the right data after a crash. This page explains how to run the Solarium test suite, and what the crash tests check.
+The tests check that Solarium gives the right answers, and that it keeps the right data after a crash. This page explains how to run the Solarium test suite, and what the crash tests check.
 
 ## Run the tests
 
@@ -67,7 +67,7 @@ A killed process loses nothing that the operating system holds. So every acknowl
 
 ## Concurrent compaction tests
 
-`ConcurrentCompactionTests` runs several compactions at once and checks that they keep out of each other's way:
+`ConcurrentCompactionTests` runs several compactions at once and checks that they do not get in the way of one another:
 
 - A held merge of one column family does not hold back the merge of another.
 - The picker passes over the files and the key ranges that running compactions hold.

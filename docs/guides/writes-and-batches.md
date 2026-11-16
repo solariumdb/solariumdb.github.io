@@ -55,7 +55,7 @@ You can call `Write` from any number of threads. Solarium groups the concurrent 
 4. If any writer of the group asked for `Sync`, the leader flushes the WAL once for the group.
 5. Each writer inserts its own batch into the memtable.
 
-So sixteen threads that each write a synced batch cause one device flush, not sixteen. A synced write is slow alone, but many synced writers together are fast. The [Benchmarks](../operations/benchmarks.md) page shows this: 16 synced writers made about 8 times the entries per second of 1 writer.
+So sixteen threads that each write a synced batch cause one device flush. A single synced writer waits for a full device flush on each write. Many synced writers share the flushes, so their total rate is higher. The [Benchmarks](../operations/benchmarks.md) page shows this: 16 synced writers made about 8 times the entries per second of 1 writer.
 
 [Write Path](../architecture/write-path.md) explains group commit in detail.
 
@@ -70,10 +70,12 @@ WriteBatch batch = new WriteBatch()
 
 db.Write(batch, WriteOptions.Synced);
 
-long durable = batch.Sequence + batch.Count - 1;
+long durable = batch.GroupLastSequence;
 ```
 
-Every sequence number at or below `durable` is durable when a synced `Write` returns. The value is 0 for a batch that was never written. A later write of the batch sets it again.
+`WriteBatch.GroupLastSequence` is the last sequence number of the write group that carried the batch. The database appends a group to the WAL in one write, and flushes it once before any of its writers returns. So every sequence number at or below `durable` is durable when a synced `Write` returns. The writers of one group record one number between them.
+
+The operations of the batch itself hold `batch.Sequence` to `batch.Sequence + batch.Count - 1`. Both values are 0 for a batch that was never written, and a later write of the batch sets them again. Do not record `LatestSequenceNumber` for this purpose, because a later unsynced group can raise it.
 
 ## Errors
 
@@ -91,4 +93,4 @@ When flushes add level 0 files faster than compaction removes them, `Write` slow
 
 ## A large batch
 
-A batch larger than `MaxWriteBatchGroupSizeBytes` (1 MiB by default) is a group of its own. This is correct and safe. But a very large batch holds the memtable and the WAL for a long time, and other writers wait for it. Split a bulk load into batches of a few hundred kilobytes to a few megabytes.
+A batch larger than `MaxWriteBatchGroupSizeBytes` (1 MiB by default) is a group of its own. A very large batch holds the memtable and the WAL for a long time, and other writers wait for it. Split a bulk load into batches of a few hundred kilobytes to a few megabytes.

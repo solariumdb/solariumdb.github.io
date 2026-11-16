@@ -35,12 +35,14 @@ All members except `Name` and `OpenFile` have default implementations, on the fi
 
 | Environment | Reads and writes | Flush |
 | --- | --- | --- |
-| `DefaultStorageEnvironment` (all platforms) | `RandomAccess` (pread and pwrite) | `RandomAccess.FlushToDisk` |
+| `DefaultStorageEnvironment` (all platforms) | `RandomAccess` (pread and pwrite) | `fdatasync` on Linux. `RandomAccess.FlushToDisk` elsewhere: `F_FULLFSYNC` on macOS, `FlushFileBuffers` on Windows. |
 | `IoUringStorageEnvironment` (Linux, in `Solarium.IoUring`) | Writes: `IORING_OP_WRITE` on one ioxide reactor thread. Reads: `pread` on the calling thread. Batch reads: `preadv2(RWF_NOWAIT)` on the calling thread, then `IORING_OP_READ` for what the page cache misses. | `fdatasync` on the calling thread |
+
+On Linux, both storage environments flush with `fdatasync`, as RocksDB does by default. It makes the data and the length durable, and skips the journal commit that a changed timestamp alone needs with `fsync`. A write in place over allocated blocks, such as a slot of the sync ledger of Kommander, would otherwise pay that commit at every flush.
 
 The host owns an environment, and disposes it after every database that uses it is closed. `DefaultStorageEnvironment.Instance` is shared and needs no dispose.
 
-## Why io_uring is not faster here
+## io_uring performance
 
 The engine issues one write at a time. Every write in the io_uring storage environment is a hand-off to the reactor thread, and the hand-off costs more than the system call that it replaces. Measured with ext4 on an NVMe drive:
 
@@ -48,7 +50,7 @@ The engine issues one write at a time. Every write in the io_uring storage envir
 - A 4 KB write takes 6.33 µs instead of 0.93 µs, and a 64 KB write 21.7 µs instead of 13.8 µs, on Linux 6.12 on 2026-10-29. On Linux 6.1, io_uring could not complete a buffered ext4 write inline. It passes the write to one of its worker threads (`iou-wrk`), and the extra cost grows with the size of the write.
 - A synced `Put` costs the same in both environments, because the device flush takes milliseconds and neither environment sends it through the ring.
 
-io_uring can only win when many operations are in flight at once.
+io_uring is faster only when many operations are in flight at once.
 
 ### Reads on the calling thread
 

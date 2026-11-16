@@ -45,7 +45,7 @@ This is safe for readers:
 
 This keeps out of the SSTables the entries that die while still in memory. An example is the log rows of Kommander under a range tombstone that stays in the active memtable.
 
-## Why the WAL flush comes before the manifest
+## The WAL flush before the manifest save
 
 A batch can span column families. The rest of the batch, or an earlier batch of another column family, can still be in the WAL only. Without step 3, a power loss could keep the new table but lose those writes. Then the database would show part of a batch.
 
@@ -59,7 +59,7 @@ So the current WAL file is flushed before the manifest save. No record before th
 
 ## The WAL file after a flush
 
-A new WAL file starts at the first write group after a memtable switch, not at the switch. So after `Flush`, the WAL file changes at the next write group.
+A new WAL file starts at the first write group after a memtable switch. So after `Flush`, the WAL file changes at the next write group.
 
 ## Paced writes
 

@@ -90,7 +90,7 @@ db.Write(new WriteBatch()
     WriteOptions.Synced);
 ```
 
-The batch applies all its operations, or none of them. `WriteOptions.Synced` flushes the WAL before `Write` returns, so the batch survives a power loss. Without it, the write survives a process crash but not a power loss. [Writes and Batches](guides/writes-and-batches.md) explains the choice.
+The batch applies all its operations, or none of them. `WriteOptions.Synced` flushes the WAL before `Write` returns, so the batch survives a power loss. Without it, the write survives a process crash, but a power loss can lose it. [Writes and Batches](guides/writes-and-batches.md) explains the choice.
 
 Keys and values are bytes. The `u8` suffix of C# makes a UTF-8 byte span from a string literal. Keys sort by their bytes, as unsigned values.
 
@@ -130,7 +130,7 @@ db.Delete("user:42"u8);
 db.DeleteRange("log:0000"u8, "log:0001"u8);
 ```
 
-`DeleteRange` deletes every key from the begin key up to the end key. The begin key is included and the end key is excluded. It writes one range tombstone, not one delete for each key.
+`DeleteRange` deletes every key from the begin key up to the end key. The begin key is included and the end key is excluded. It writes one range tombstone for the whole range.
 
 ## The complete program
 

@@ -25,7 +25,7 @@ const advantageCards = [
   {
     title: 'No native library',
     description:
-      'Solarium is managed code only. It runs on every platform that .NET 10 runs on, with no native binary to build, ship, or match to a runtime.',
+      'Solarium is managed code only. It runs on every platform that .NET 10 runs on, with no native binary for each operating system and CPU.',
   },
   {
     title: 'Built for a Raft log',
@@ -45,7 +45,7 @@ const advantageCards = [
   {
     title: 'Recovery that tells damage from a crash',
     description:
-      'Each WAL record carries the durable offset of its file, so recovery cuts a torn tail but refuses damage to data that was flushed.',
+      'Each WAL record carries the durable offset of its file, so recovery cuts a torn tail. It refuses to open on damage to flushed data.',
   },
 ];
 
@@ -91,7 +91,7 @@ const fitCards = [
     ],
   },
   {
-    title: 'Not the target (yet)',
+    title: 'Poor fit today',
     items: [
       'A database server with a network protocol',
       'Stores much larger than memory that need a cache of data blocks in the process',
@@ -293,7 +293,7 @@ function HomepageHeader() {
               Get started
             </Link>
             <Link className={styles.secondaryButton} to="/docs/why-solarium">
-              Why Solarium
+              Benefits and limits
             </Link>
             <Link className={styles.secondaryButton} to="/docs/operations/benchmarks">
               Benchmarks
@@ -358,7 +358,7 @@ export default function Home() {
         <section className={styles.primarySection}>
           <div className="container">
             <SectionHeading
-              eyebrow="Why use it"
+              eyebrow="What you get"
               title="A log-structured store you can read end to end"
               subtitle="Solarium gives Raft logs and key-value stores a log-structured engine in C# that you can step through in a debugger."
             />
@@ -403,7 +403,7 @@ export default function Home() {
             <SectionHeading
               eyebrow="How it is tested"
               title="Tested against power loss and crashes"
-              subtitle="A storage engine is only as good as its recovery. The tests cut the power and kill processes at random points, and then check every acknowledged write."
+              subtitle="The tests cut the power and kill processes at random points. Then they check every acknowledged write."
             />
             <div className={styles.testingGrid}>
               {testingCards.map((card) => (
@@ -424,8 +424,8 @@ export default function Home() {
         <section className={styles.bandSection}>
           <div className="container">
             <SectionHeading
-              eyebrow="What it is"
-              title="Is Solarium right for your project?"
+              eyebrow="Scope"
+              title="Where Solarium fits today"
               subtitle="Solarium is a brand-new database. Use it where its scope matches yours, and read the list of what is not done yet."
             />
             <div className={styles.fitGrid}>
