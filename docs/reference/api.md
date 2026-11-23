@@ -49,7 +49,7 @@ The namespace is `Solarium`.
 
 ### Reads in place
 
-`Get` copies the value into a new array. `TryGet`, and `MultiGet` with a visitor, give the value to a callback and do not copy it. Use them when you need a few bytes of a large value. These two members are in the source repository after version 0.2.1, and the 0.2.1 packages do not have them.
+`Get` copies the value into a new array. `TryGet`, and `MultiGet` with a visitor, give the value to a callback and do not copy it. Use them when you need a few bytes of a large value. These two members are in development. Version 0.2.1 does not have them, and they can change before a release.
 
 ```csharp
 // The first 8 bytes of the value. A static lambda allocates nothing.

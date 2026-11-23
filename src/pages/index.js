@@ -20,32 +20,32 @@ const advantageCards = [
   {
     title: 'A complete storage engine in .NET',
     description:
-      'One directory, column families, atomic batches across them, range deletes, ordered iterators, checkpoints, and leveled compaction.',
+      'Column families with atomic batches across them, in one directory. You also get range deletes, ordered iterators, checkpoints, and leveled compaction.',
   },
   {
     title: 'No native library',
     description:
-      'Solarium is managed code only. It runs on every platform that .NET 10 runs on, with no native binary for each operating system and CPU.',
+      'Solarium is managed code only. One package works on any platform with .NET 10. There is no native binary for each operating system and CPU.',
   },
   {
     title: 'Built for a Raft log',
     description:
-      'It covers what the Raft log of Kommander needs. Appended log files move down the levels with no rewrite, and a dead prefix goes away as whole files.',
+      'It covers what the Raft log of Kommander needs. Appended log files move down the levels and are not rewritten. The files of a dead prefix are dropped in one manifest save.',
   },
   {
     title: 'Fast writes from many threads',
     description:
-      'Group commit shares WAL appends and flushes across writers, pipelines the next group, and lets each writer insert its own batch.',
+      'Group commit shares WAL appends and flushes across writers. The next group can append to the WAL while the writers of a group insert their batches in parallel.',
   },
   {
-    title: 'Reads that take no locks',
+    title: 'Reads that take no engine locks',
     description:
       'A read takes a version and a snapshot and searches a lock-free skip list and immutable SSTables. Fragmented range tombstones keep reads fast.',
   },
   {
     title: 'Recovery that tells damage from a crash',
     description:
-      'Each WAL record carries the durable offset of its file, so recovery cuts a torn tail. It refuses to open on damage to flushed data.',
+      'Each WAL record carries the durable offset of its file. Recovery uses it to cut a torn tail, and the open fails on damage to flushed data.',
   },
 ];
 
@@ -53,7 +53,7 @@ const testingCards = [
   {
     title: 'Power-loss tests',
     description:
-      'A storage environment keeps only what each file held at its last flush, then writes out what a power loss can leave, in order or sector by sector in any order.',
+      'A storage environment records what each file held at its last flush. It then writes out what a power loss can leave, in order or sector by sector in any order.',
     linkLabel: 'Read about the crash tests',
     to: '/docs/operations/testing',
   },
@@ -74,7 +74,7 @@ const testingCards = [
   {
     title: 'Checkpoints under load',
     description:
-      'A checkpoint is held at its first write while the source writes, flushes, and compacts. The copy must read as the source did when the checkpoint began.',
+      'A checkpoint is paused at its first write. The source continues to write, and it also flushes and compacts. The copy must read as the source did when the checkpoint began.',
     linkLabel: 'Read about the checkpoint tests',
     to: '/docs/operations/testing#checkpoint-tests',
   },
@@ -84,7 +84,7 @@ const fitCards = [
   {
     title: 'Good fit',
     items: [
-      'Embedded, ordered key-value data inside a .NET service',
+      'Embedded, ordered key-value data in a .NET service',
       'Services that want a storage engine they can read and debug in C#',
       'The Raft log of a Kommander node',
       'The storage of a Kahuna node, with no native library',
@@ -95,8 +95,8 @@ const fitCards = [
     items: [
       'A database server with a network protocol',
       'Stores much larger than memory that need a cache of data blocks in the process',
-      'Fast synced writes beside heavy compactions, without a rate limit tuned to your drive',
-      'Production use without your own testing: Solarium is a young database',
+      'Fast synced writes beside heavy compactions, if you cannot tune a rate limit to your drive',
+      'Production use before you test it yourself: Solarium is a young database',
     ],
   },
 ];
@@ -126,7 +126,7 @@ const integrations = [
     to: '/docs/integrations/kommander',
     linkLabel: 'Read about Solarium.Kommander',
     description:
-      'SolariumWAL, a Kommander IWAL. Pass it to RaftManager, with no change to Kommander and no native library.',
+      'SolariumWAL, a Kommander IWAL. You pass it to RaftManager. Kommander does not change, and there is no native library to ship.',
   },
   {
     name: 'Solarium.Kahuna',
@@ -380,7 +380,7 @@ export default function Home() {
             <SectionHeading
               eyebrow="Integrations"
               title="A drop-in WAL for Kommander and Kahuna"
-              subtitle="Solarium exists to be a durable log store for Kommander. Two packages connect it to Kommander and Kahuna with no change to either."
+              subtitle="Solarium exists to be a durable log store for Kommander. Two packages connect it to Kommander and Kahuna, and both work unmodified."
             />
             <div className={styles.usedByGrid}>
               {integrations.map((project) => (
@@ -448,8 +448,8 @@ export default function Home() {
         <section className={styles.primarySection}>
           <div className="container">
             <SectionHeading
-              eyebrow="Inside the engine"
-              title="Every part of the engine explained"
+              eyebrow="How it works"
+              title="The architecture of the engine"
               subtitle="The architecture pages describe each part of Solarium in the order that a write and a read go through it."
             />
             <div className={styles.calloutRow}>
@@ -470,8 +470,8 @@ export default function Home() {
                   Leveled compaction
                 </Heading>
                 <p className={styles.cardDescription}>
-                  Seven levels with dynamic level sizing, appended keys that move down with no
-                  rewrite, and whole-file drops with DeleteFilesInRange.
+                  Seven levels with dynamic level sizing. Appended keys move down and are not
+                  rewritten, and DeleteFilesInRange drops the files of a dead key range.
                 </p>
                 <Link className={styles.inlineLink} to="/docs/architecture/compaction">
                   Read about compaction
