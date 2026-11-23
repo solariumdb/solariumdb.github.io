@@ -33,42 +33,39 @@ sequenceDiagram
 
 As in the flush of RocksDB with no snapshot, the flush writes only the newest version of each key. It drops a key that a newer range tombstone of the same memtable covers.
 
-It keeps:
+The flush also writes the markers that hide data in older tables. These are the range tombstones and the point deletes that no range tombstone covers.
 
-- the range tombstones, because they hide data in older tables;
-- a point delete that no tombstone covers, for the same reason.
+Readers do not need the entries that the flush drops.
 
-This is safe for readers:
-
-- A reader that enters the new version takes its snapshot after the table is installed. Its snapshot is above every entry of the memtable, so it needs nothing that the flush dropped.
+- A reader that enters the new version takes its snapshot after the table is installed. Its snapshot is above every entry of the memtable.
 - A reader of the older version reads the memtable itself.
 
-This keeps out of the SSTables the entries that die while still in memory. An example is the log rows of Kommander under a range tombstone that stays in the active memtable.
+Entries that die in memory do not go to the SSTables. An example is the log rows of Kommander under a range tombstone that is in the active memtable.
 
 ## The WAL flush before the manifest save
 
-A batch can span column families. The rest of the batch, or an earlier batch of another column family, can still be in the WAL only. Without step 3, a power loss could keep the new table but lose those writes. Then the database would show part of a batch.
+A batch can span column families. The rest of the batch, or an earlier batch of another column family, can be in the WAL only. Without step 3, a power loss could keep the new table but lose those writes. Then the database would show part of a batch.
 
-So the current WAL file is flushed before the manifest save. No record before the table can be lost while the table survives. RocksDB syncs its closed WAL files before it commits a flush for the same reason. The older WAL files were flushed when they stopped being current.
+For this reason, the current WAL file is flushed before the manifest save. No record before the table can be lost while the table survives. RocksDB syncs its closed WAL files before it commits a flush for the same reason. The older WAL files were flushed when they stopped being current.
 
 ## When writes wait for a flush
 
-- When a column family holds `MaxWriteBufferNumber` memtables, a memtable switch waits for a flush.
+- When a column family has `MaxWriteBufferNumber` memtables, a memtable switch waits for a flush.
 - When the memtables of the databases that share a `WriteBufferManager` pass its cap, the database that writes next switches and flushes its column family with the oldest data. See [The memtable budget](../guides/memory.md#the-memtable-budget).
 - When the live WAL files are larger than `MaxTotalWalSize`, the column families that keep the oldest WAL file alive are flushed. This stops a column family with few writes from keeping old WAL files forever.
 
 ## The WAL file after a flush
 
-A new WAL file starts at the first write group after a memtable switch. So after `Flush`, the WAL file changes at the next write group.
+A new WAL file starts at the first write group after a memtable switch. This means that the WAL file changes at the next write group after `Flush`.
 
 ## Paced writes
 
-With a `RateLimiter`, a flush asks for the bytes of each 1 MiB write of its SSTable at high priority, so it goes before the compactions. With `BytesPerSync`, it starts the writeback of its table as it writes it. See [Paced writes](compaction.md#paced-writes).
+With a `RateLimiter`, a flush asks for the bytes of each 1 MiB write of its SSTable at high priority, and it goes before the compactions. With `BytesPerSync`, it starts the writeback of its table as it writes it. See [Paced writes](compaction.md#paced-writes).
 
 ## Failures
 
-A flush failure, like a WAL failure, stops all later writes until the database opens again. Reads continue. A crash before the manifest save leaves the new table as an orphan, and the next open deletes it. A crash after the save can leave old WAL files on disk. The next open replays them and skips the entries that an SSTable already holds.
+A flush failure, like a WAL failure, stops all later writes until the database opens again. Reads continue. A crash before the manifest save leaves the new table as an orphan, and the next open deletes it. A crash after the save can leave old WAL files on disk. The next open replays them and skips the entries that are already in an SSTable.
 
 ## Flushes during recovery
 
-At open, a memtable that fills during the WAL replay is written as a level 0 table at once, as in the recovery of RocksDB. So the WAL files do not need to fit in memory. The manifest saved at the end of the open records those tables.
+At open, a memtable that fills during the WAL replay is written as a level 0 table at once, as in the recovery of RocksDB. This means that the WAL files do not need to fit in memory. The manifest saved at the end of the open records those tables.

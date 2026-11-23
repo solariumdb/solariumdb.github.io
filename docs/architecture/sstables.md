@@ -4,24 +4,24 @@ sidebar_position: 7
 
 # SSTables
 
-An **SSTable** (sorted string table) is an immutable file of sorted entries. A flush or a compaction writes it once, and nothing changes it after the manifest names it. This page gives the layout of the file.
+An **SSTable** (sorted string table) is an immutable file of sorted entries. A flush or a compaction writes it once, and the file does not change after the manifest names it. This page gives the layout of the file.
 
 ## What an SSTable holds
 
-An SSTable stores internal keys: the user key, the sequence number, and the kind. So a read can order the versions of a key, and the range tombstones over it, across the memtables and the tables by sequence number.
+An SSTable stores internal keys: the user key, the sequence number, and the kind. With the sequence numbers, a read can order the versions of a key, and the range tombstones over it, across the memtables and the tables.
 
-It holds, in this order:
+The parts of the file are in the order of this table.
 
 | Part | Content |
 | --- | --- |
 | Data blocks | The entries, in internal key order, in blocks of about 4 KB. Each block is raw or, with `ColumnFamilyOptions.Compression`, an LZ4 block. |
 | Range tombstone block | The range tombstones of the table. |
-| Index and filter partitions | For each run of data blocks, a filter block and an index block. The index holds the last internal key of each data block, with its offset and size. The filter is a Bloom filter on the user keys of those blocks: 10 bits for each key and 7 probes, about 1% false positives. |
+| Index and filter partitions | For each run of data blocks, a filter block and an index block. The index lists the last internal key of each data block, with its offset and size. The filter is a Bloom filter on the user keys of those blocks: 10 bits for each key and 7 probes, about 1% false positives. |
 | Properties block | The entry count, the lowest and highest sequence numbers, and the smallest and largest keys. |
 | Top-level index | The last internal key of each partition, with the handles of its index and its filter. |
 | Footer | The table id, the handles of the other blocks, the format version, a checksum, and a magic number. |
 
-Every block and the footer carry a checksum, based on a CRC-32.
+The footer and each block have a checksum, based on a CRC-32.
 
 ## The layout
 
@@ -45,27 +45,27 @@ footer          = [u64 table id], then 4 handles (range tombstone, filter, prope
                   as [u64 offset][u32 size], then [u32 format version][u32 CRC-32 of the 60 bytes before it][u64 magic]
 ```
 
-Each block is followed by the checksum of its payload. A data block also has the offset of its last entry and a type byte between its payload and the checksum, and the checksum covers both. In versions 5 and 4, the filter handle of the footer is (0, 0), because each partition names its own filter. The magic number is `SOLARIM1`.
+Each block is followed by the checksum of its payload. A data block also has the offset of its last entry and a type byte between its payload and the checksum, and the checksum covers both. In versions 5 and 4, each partition names its filter, and the filter handle of the footer is (0, 0). The magic number is `SOLARIM1`.
 
 `TableFormat` in `src/Solarium/Engine/TableFormat.cs` documents the exact layout.
 
 ## Notes on the format
 
-- **Keys are stored whole.** Each key comes after 17 bytes of lengths, sequence number, and kind. RocksDB stores only the part of a key that differs from the key before it, with varint lengths. LZ4 compression gets back most of that space when keys share long prefixes.
+- **Keys are stored whole.** The 17 bytes before each key are for the lengths, with the sequence number and the kind. RocksDB stores only the part of a key that differs from the key before it, with varint lengths. LZ4 compression gets back most of that space when keys share long prefixes.
 - **Compression is for each block.** A block that LZ4 makes smaller by less than one eighth is stored raw. Only data blocks are compressed.
 - **Partitions follow RocksDB.** An index partition is cut when it reaches about 4 KB of index entries, as the partitioned index of RocksDB with `metadata_block_size`.
-- **The versions of one key can span blocks and partitions**, because each index holds last internal keys. A key whose versions continue into the next partition is in both filters.
-- **Exclusive largest bound.** A table records when its largest bound is the end of a range tombstone that none of its entries has. Then two tables of a level can meet at that key without overlapping. See [Compaction](compaction.md#the-merge).
+- **The versions of one key can span blocks and partitions.** This is possible as each index lists last internal keys. A key whose versions continue into the next partition is in both filters.
+- **Exclusive largest bound.** A table records when its largest bound is the end of a range tombstone that none of its entries has. Two tables of a level can then meet at that key, and they do not overlap. See [Compaction](compaction.md#the-merge).
 
 ## Checks of table and block placement {#how-a-table-proves-its-place}
 
-A plain CRC-32 shows only that the bytes of a block are whole. A write that went to the wrong offset leaves a block that passes its CRC-32. Then a read can search the wrong keys and answer "not found". Version 5 of the table format closes this gap in three ways:
+A CRC-32 alone shows only that the bytes of a block are intact. A write that went to the wrong offset leaves a block that passes its CRC-32. Then a read can search the wrong keys and answer "not found". Version 5 of the table format closes this gap. It ties each block to its table and offset, and it checks tables against the manifest and blocks against the index.
 
-- **Checksums are bound to the table and the offset.** Each table has a random nonzero 64-bit id in its footer. The stored checksum of a block is its CRC-32 XOR a modifier of the id and the offset of the block, as the context checksum of RocksDB. So a block copied from another place or another table fails its checksum. The CRC-32 of the footer has no modifier, because it covers the id.
-- **The manifest records each table.** An open compares the id, the size, the entry count, the sequence numbers, and the key range with the file. So a table file that another valid table replaced fails the open.
-- **A data block must match its index entry.** Each read of a block from the file checks that its last key is the one that the index holds, and that its first key comes after the block before it. This check runs on tables of every version.
+- **Checksums are bound to the table and the offset.** Each table has a random nonzero 64-bit id in its footer. The stored checksum of a block is its CRC-32 XOR a modifier of the id and the offset of the block, as the context checksum of RocksDB. This means that a block copied from another place or another table fails its checksum. The CRC-32 of the footer has no modifier, because it covers the id.
+- **The manifest records each table.** An open compares the id, the size, the entry count, the sequence numbers, and the key range with the file. If another valid table replaced the file, the open fails.
+- **A data block must match its index entry.** Each read of a block from the file checks that its last key is the one in the index, and that its first key comes after the block before it. This check applies to tables of all versions.
 
-A version 5 data block names the offset of its last entry, so the key check decodes two entries. An older block is walked from the start. A point read walks half a block on average, so a walk of the whole block almost doubled the work inside a block for a `Get` that misses the cache: 11% to 15% fewer uncached `Get` operations per second on a store in memory. With the named entry, the rate is about 4% below the rate without the check.
+A version 5 data block names the offset of its last entry, and the key check decodes two entries. An older block is walked from the start. A point read walks half a block on average. A walk to the end of the block almost doubled the work in a block for a `Get` that misses the cache: 11% to 15% fewer uncached `Get` operations per second on a store in memory. With the named entry, the rate is about 4% below the rate without the check.
 
 A failed check throws `SolariumException` with `IsCorruption` set. [Durability](../operations/durability.md#damage-to-an-sstable) lists what is checked and when.
 
@@ -74,18 +74,20 @@ A failed check throws `SolariumException` with `IsCorruption` set. [Durability](
 | Version | Difference |
 | --- | --- |
 | 5 | The current version. Each table has an id, block checksums are bound to the id and the offset, and each data block names its last entry. The footer is 72 bytes. |
-| 4 | The index and the filter are cut into partitions under a top-level index. Plain CRC-32 checksums, and a footer of 64 bytes. It still reads, until a compaction rewrites it. |
-| 3 | One index block and one filter block, which read as one partition. Data blocks have a type byte and can be compressed. It still reads, until a compaction rewrites it. |
-| 2 | Written before data blocks had a type. Its data blocks are raw entries. It still reads, until a compaction rewrites it. |
+| 4 | The index and the filter are cut into partitions under a top-level index. Plain CRC-32 checksums, and a footer of 64 bytes. |
+| 3 | One index block and one filter block, which read as one partition. Data blocks have a type byte and can be compressed. |
+| 2 | Written before data blocks had a type. Its data blocks are raw entries. |
+
+Solarium can read tables of versions 2 to 4. A compaction rewrites them in version 5.
 
 ## What an open table keeps in memory
 
-When a table opens, it reads and verifies every partition. It keeps in memory:
+When a table opens, it reads and verifies all its partitions. A small part of the table then remains in memory.
 
 - the top-level index, about 0.04% of the table bytes;
-- the index and filter partitions, about 2% of the table bytes and 4% with LZ4, because LZ4 shrinks the data blocks and leaves the index keys at full size. With `CacheIndexAndFilterBlocks`, they go to the block cache instead;
+- the index and filter partitions, about 2% of the table bytes and 4% with LZ4 (LZ4 shrinks the data blocks and leaves the index keys at full size). With `CacheIndexAndFilterBlocks`, they go to the block cache instead;
 - the range tombstones, cut into fragments that do not overlap. With 8 tombstones or fewer, it scans them instead, which costs less than the build.
 
-Each index is decoded into a few arrays: one of the last keys laid end to end, one of where each key starts, and one each of the sequence numbers, offsets, and sizes. So an index is five objects, whatever its number of blocks. One array for each key made a long-lived object for every 4 KB of data.
+Each index is decoded into five arrays. One has the last keys laid end to end, and one has the place where each key starts. The other three are for the sequence numbers, the offsets and the sizes. An index is then five objects for any number of blocks. With one array for each key, 4 KB of data made one long-lived object.
 
-`rocksdb.estimate-table-readers-mem` reports these bytes. The data blocks are read from the file on each read, through the page cache of the operating system, unless `CacheDataBlocks` keeps them in the block cache.
+The property `rocksdb.estimate-table-readers-mem` gives these bytes. The data blocks are read from the file on each read, through the page cache of the operating system, unless they are in the block cache (with `CacheDataBlocks`).

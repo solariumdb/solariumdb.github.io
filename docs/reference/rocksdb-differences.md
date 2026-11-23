@@ -8,7 +8,7 @@ RocksDB is the reference behavior. This page lists every deliberate difference. 
 
 ## Scope
 
-Solarium covers the part of RocksDB that the Raft log of Kommander and the backend of Kahuna use. These features of RocksDB are not in Solarium:
+Solarium covers the part of RocksDB that the Raft log of Kommander and the backend of Kahuna use. The RocksDB features below are not in Solarium.
 
 - a block cache with lookups that take no lock (`HyperClockCache`), and a strict cache capacity;
 - a stall from the memtable budget (`allow_stall`);
@@ -22,68 +22,68 @@ Solarium covers the part of RocksDB that the Raft log of Kommander and the backe
 
 ## Files and formats
 
-- **The manifest** is written again whole on each change. RocksDB appends edits to a log.
-- **A data block** stores each key whole, after 17 bytes of lengths, sequence number, and kind. RocksDB stores only the part of a key that differs from the key before it, with varint lengths.
-- **The index and filter are always partitioned**, as with `index_type = kTwoLevelIndexSearch` and `partition_filters`, which RocksDB writes only when asked. Each partition holds about 4 KB of index entries (`metadata_block_size`), with a filter on the user keys of its blocks, under a top-level index. A table written before partitions has one partition, its whole index and filter, until a compaction rewrites it.
+- **The manifest** is rewritten on each change. RocksDB appends edits to a log.
+- **A data block** stores the full key of each entry, after 17 bytes of lengths, sequence number, and kind. RocksDB stores only the part of a key that differs from the key before it, with varint lengths.
+- **The index and filter are always partitioned**, as with `index_type = kTwoLevelIndexSearch` and `partition_filters`, which RocksDB writes on request. Each partition has about 4 KB of index entries (`metadata_block_size`), with a filter on the user keys of its blocks, under a top-level index. A table written before partitions has one partition for all of its index and filter, until a compaction rewrites it.
 - **A block checksum** is a CRC-32 with the context checksum modifier of RocksDB (`format_version` 6) mixed in: the table id folded to 32 bits, XOR the sum of the halves of the block offset. The checksum of RocksDB is CRC32c or XXH3, and its base is a value for each file in its footer.
 - **The manifest records each table id.** An open compares the id, the size, the entry count, the sequence numbers, and the key range with the table file. RocksDB compares a table unique id with its manifest (`verify_sst_unique_id_in_manifest`), and its file size.
-- **A read checks each data block against its index entries**, by its first and last keys. RocksDB does not. So a misplaced block is corruption also in a table without context checksums.
-- **The WAL file** has its own header and a version. RocksDB writes its WAL in 32 KB blocks. Each WAL record carries the offset of the file that a flush made durable. Recovery uses it to tell power-loss damage from damage to flushed data. The WAL of RocksDB has no such field, so its recovery modes either fail the open after such a power loss or drop data after any damage.
+- **A read checks each data block against its index entries**, by its first and last keys. RocksDB does not. This means that a misplaced block is corruption also in a table without context checksums.
+- **The WAL file** has its own header and a version. RocksDB writes its WAL in 32 KB blocks. Each WAL record carries the offset of the file that a flush made durable. Recovery uses it to tell power-loss damage from damage to flushed data. The WAL of RocksDB does not have this field. Its recovery modes either fail the open after such a power loss or drop data after any damage.
 
 ## Compression and caching
 
 - `ColumnFamilyOptions.Compression` defaults to `None`, and its only codec is `Lz4`, from the managed `K4os.Compression.LZ4`. The default of RocksDB is Snappy, and it offers more codecs.
-- Only data blocks are compressed. RocksDB never compresses filter blocks, and compresses index blocks only to keep them in its block cache.
+- Only data blocks are compressed. RocksDB does not compress filter blocks, and compresses index blocks only to keep them in its block cache.
 - As in RocksDB, a block that compression makes smaller by less than one eighth is stored raw.
-- **No block cache by default.** A column family has no block cache unless you set `ColumnFamilyOptions.BlockCache`. RocksDB gives a table factory without one an LRU cache of its own, 32 MiB in current releases.
-- **Data blocks are cached only on request.** The cache holds the index and filter blocks with `CacheIndexAndFilterBlocks`, and the data blocks only with `CacheDataBlocks`. RocksDB has no such switch: it caches data blocks whenever it has a block cache. Without `CacheDataBlocks`, a read of a data block reads it from the file, through the page cache of the operating system, and decompresses it each time. With it, a compressed block is decompressed once for each cache miss, as in RocksDB. Caching data blocks made reads 1.14 to 1.46 times as fast on a store that fits in the cache, from 1 and from 8 threads, but 0.65 to 0.93 times as fast on a store ten times the cache. See [Data blocks in a cache](../operations/benchmarks.md#data-blocks-in-a-cache).
+- **No block cache by default.** To give one to a column family, set `ColumnFamilyOptions.BlockCache`. When a table factory is given no cache, RocksDB creates an LRU cache for it, 32 MiB in current releases.
+- **Data blocks are cached only on request.** The index and filter blocks are cached with `CacheIndexAndFilterBlocks`, and the data blocks only with `CacheDataBlocks`. RocksDB does not have the second switch: it caches data blocks whenever it has a block cache. When `CacheDataBlocks` is off, a read of a data block reads it from the file, through the page cache of the operating system, and decompresses it each time. When it is on, a compressed block is decompressed once for each cache miss, as in RocksDB. Caching data blocks made reads 1.14 to 1.46 times as fast on a store that fits in the cache, from 1 and from 8 threads, but 0.65 to 0.93 times as fast on a store ten times the cache. See [Data blocks in a cache](../operations/benchmarks.md#data-blocks-in-a-cache).
 - **A data block is one native allocation.** A cached data block is decompressed into native memory, charged its length, with a small managed handle that counts its readers. An eviction frees the block when its last reader releases it. RocksDB charges the allocation of a block and its handle.
-- **Closed databases leave nothing.** The data blocks of a table that a compaction retires stay in the cache until it evicts them, as in RocksDB. Its index and filter partitions leave at once. A database that closes erases all its entries. RocksDB leaves them to the LRU.
+- **Closed databases leave no entries.** The data blocks of a table that a compaction retires stay in the cache until it evicts them, as in RocksDB. Its index and filter partitions leave at once. A database that closes erases all its entries. RocksDB leaves them to the LRU.
 - **The high-priority pool.** `highPriorityPoolRatio` (`high_pri_pool_ratio`, 0.5 by default, as in RocksDB) is the share of each shard for the index and filter blocks (`CacheIndexAndFilterBlocksWithHighPriority`) and each entry read again after its insert. There is no low-priority pool ratio and no bottom priority, which RocksDB uses for blobs.
-- **One partition is one cache entry.** Its index and filter are one entry, charged the bytes of their arrays. RocksDB caches them as two blocks, charged their allocations. The top-level index stays in the table, counted in `estimate-table-readers-mem`. RocksDB caches it, pinned by `pin_top_level_index_and_filter`.
-- **A table caches every partition when it opens**, after it verifies it, as RocksDB with `prefetch_index_and_filter_in_cache`. A table that a compaction writes caches its own at open too.
+- **One partition is one cache entry.** Its index and filter are one entry, charged the bytes of their arrays. RocksDB caches them as two blocks, charged their allocations. The top-level index is in the memory of the table, counted in `estimate-table-readers-mem`. RocksDB caches it, pinned by `pin_top_level_index_and_filter`.
+- **A table caches every partition when it opens**, after it verifies it, as RocksDB with `prefetch_index_and_filter_in_cache`. A table that a compaction writes caches its partitions at open too.
 - **A miss decodes a partition.** A lookup on a partition that the cache evicted reads its two blocks again from the file and decodes them, a few kilobytes. RocksDB searches a block in place. With a cache of a quarter of the partitions, lookups from one thread ran about 2.5 times slower than with all of them.
-- **No cache of its own.** `CacheIndexAndFilterBlocks` or `CacheDataBlocks` without a `BlockCache` throws.
-- **No strict capacity** (`strict_capacity_limit`). The cache stays over its capacity when only pinned entries are left, as the default of RocksDB.
-- **A reader keeps what it took.** A read keeps the index that it took after the cache evicts it, without a reference that keeps it in the cache. An evicted entry leaves the capacity at once, and its memory when the last reader drops it. An iterator keeps the index partition of each table that it reads, until it moves to another partition or is disposed, as the iterators of RocksDB keep their index block.
+- **No implicit cache.** `CacheIndexAndFilterBlocks` or `CacheDataBlocks` without a `BlockCache` throws.
+- **No strict capacity** (`strict_capacity_limit`). The cache can be over its capacity when only pinned entries are left, as with the default of RocksDB.
+- **A reader keeps what it took.** A read can use the index that it took after the cache evicts it. The read does not pin the index in the cache. An evicted entry leaves the capacity at once, and its memory when the last reader drops it. An iterator keeps the index partition of each table that it reads, until it moves to another partition or is disposed, as the iterators of RocksDB keep their index block.
 - Compactions read their inputs with `fill_cache` off, as in RocksDB.
 - The log keys of Kommander share their first 25 of 31 bytes. With 256-byte values and no compression in either engine, the flushes of Solarium wrote 8% more bytes than the keys and values, and those of RocksDB 4% fewer.
 
 ## Levels and compaction
 
-- **Levels are always sized dynamically**, as with the default `level_compaction_dynamic_level_bytes` of RocksDB. There is no option for static targets. A column family that got smaller keeps its base level at the first level with files, as in RocksDB, but its levels above the size that it needs are not drained. RocksDB compacts such a level down on its own.
-- **The score of level 0 is its file count only.** RocksDB, with dynamic level sizing, also scores level 0 by its bytes against the target of the base level, so a few large level 0 files compact sooner. Scores do not discount the bytes that compactions are about to bring into a level, as those of RocksDB do.
+- **Levels are always sized dynamically**, as with the default `level_compaction_dynamic_level_bytes` of RocksDB. There is no option for static targets. When a column family gets smaller, its base level remains at the first level with files, as in RocksDB, but its levels above the size that it needs are not drained. RocksDB compacts such a level down automatically.
+- **The score of level 0 is its file count only.** RocksDB, with dynamic level sizing, also scores level 0 by its bytes against the target of the base level. As a result, a few large level 0 files compact sooner. Scores do not discount the bytes that compactions are about to bring into a level, as those of RocksDB do.
 - **A merge runs on one thread.** There are no subcompactions (`max_subcompactions`, whose default is 1), which split a large merge into key ranges on several threads.
-- **Background threads.** Compactions run on up to `MaxBackgroundCompactions` threads, and flushes on one. There is no `max_background_jobs` to split between them, and no `max_background_flushes`. A manual compaction always runs alone, as with `exclusive_manual_compaction`, the default of RocksDB.
-- **File selection.** A level 0 merge picks the oldest file first, as in RocksDB. A merge of a sorted level takes one file chosen by `kMinOverlappingRatio`, with no expansion to more files of the level, and without the checks of RocksDB on the overlap two levels down (`max_compaction_bytes`, the grandparent overlap).
+- **Background threads.** Compactions run on up to `MaxBackgroundCompactions` threads, and flushes on one. There is no `max_background_jobs` to split between them, and no `max_background_flushes`. No other compaction runs during a manual compaction, as with `exclusive_manual_compaction`, the default of RocksDB.
+- **File selection.** A level 0 merge picks the oldest file first, as in RocksDB. A merge of a sorted level takes one file chosen by `kMinOverlappingRatio`. It does not expand to more files of the level, and it does not make the checks of RocksDB on the overlap two levels down (`max_compaction_bytes`, the grandparent overlap).
 - **Trivial moves.** A move from level 0 can take several files at once. RocksDB moves several level 0 files only into a level that has files, and one file into any level.
 - **Range tombstone bounds.** A range tombstone is cut at the boundaries between the output files of a merge, with a user key as the excluded bound, which the table records. RocksDB bounds files with internal keys and a sentinel.
-- **Readahead is fixed.** A compaction reads 256 KiB of an input file at a time, and there is no option for it. The `compaction_readahead_size` of RocksDB is 2 MiB. With 2 MiB, a merge of tables in the page cache took a quarter longer. An iterator reads ahead as the iterators of RocksDB do, from 8 KiB up to 256 KiB, with no `readahead_size` option.
-- **Sequence numbers.** A merge keeps the sequence numbers of the entries that it writes. RocksDB sets them to 0 in the bottom level.
+- **Readahead is fixed.** A compaction reads 256 KiB of an input file at a time, and there is no option for it. The `compaction_readahead_size` of RocksDB is 2 MiB. With 2 MiB, a merge of tables in the page cache took a quarter longer. An iterator reads ahead as the iterators of RocksDB do, from 8 KiB up to 256 KiB. There is no `readahead_size` option for it.
+- **Sequence numbers.** A merge does not change the sequence numbers of the entries that it writes. RocksDB sets them to 0 in the bottom level.
 - **`CompactRange`** does not flush a memtable that overlaps the range first.
 
 ## Memtable budget
 
-- **The `WriteBufferManager` never stalls writes** (`allow_stall`). Over the cap, the writing database flushes its column family with the oldest memtable. It never flushes the memtables of another database.
-- **It counts the size of the data.** It counts the memtables as `cur-size-all-mem-tables` does. RocksDB counts the arena blocks that they allocate. The native memory of a memtable goes with the last version or flush that holds it, as in RocksDB.
-- **Cache charges.** With a cache, it charges the memtables in pinned entries of 256 KiB, as the `CacheReservationManager` of RocksDB. It gives them back as soon as the memory falls. RocksDB keeps them until the memory falls below three quarters of the reservation.
-- **The check can trail.** Each write group charges its memtable bytes after its inserts. While commits are pipelined, the check before a group can miss the groups still in their memtable stage.
+- **The `WriteBufferManager` never stalls writes** (`allow_stall`). Over the cap, the writing database flushes its column family with the oldest memtable. It does not flush the memtables of another database.
+- **It counts the size of the data.** It counts the memtables as `cur-size-all-mem-tables` does. RocksDB counts the arena blocks that they allocate. The native memory of a memtable is freed with the last version or flush that uses it, as in RocksDB.
+- **Cache charges.** With a cache, it charges the memtables in pinned entries of 256 KiB, as the `CacheReservationManager` of RocksDB. It gives them back as soon as the memory falls. RocksDB gives them back when the memory falls below three quarters of the reservation.
+- **The check can trail.** Each write group charges its memtable bytes after its inserts. While commits are pipelined, the check before a group can miss the groups that are in their memtable stage.
 - **Replay.** The WAL replay at open charges what it inserts, and flushes only at `WriteBufferSize`, as the recovery of RocksDB. So the first write after an open past the cap flushes.
-- **A flushed memtable leaves the budget when its flush installs its table**, even while readers of older versions still hold it. RocksDB frees it when the last reference to the memtable goes.
+- **A flushed memtable leaves the budget when its flush installs its table**, even if readers of older versions use it. RocksDB frees it when the last reference to the memtable goes.
 
 ## Write stalls
 
 - **The delayed write rate is fixed.** RocksDB changes it while writes are delayed: it lowers the rate as the compaction backlog grows and near the stop trigger, and raises it as the backlog gets smaller.
 - **There is no stall on pending compaction bytes** (`soft_pending_compaction_bytes_limit`, 64 GB). Only the level 0 file count slows and stops writes.
-- **There is no `WriteOptions.no_slowdown`**, which fails a write instead of delaying it.
+- **There is no `WriteOptions.no_slowdown`**, which makes a write fail where it would be delayed.
 - **`Flush` does not wait for a stall to clear first.** The `Flush` of RocksDB (with `FlushOptions.allow_write_stall` false, the default) waits while one more level 0 file or memtable would delay or stop writes.
 
 ## Rate limiter
 
 - **Writes only.** The `RateLimiter` paces flush and compaction writes, as the default mode of RocksDB, `kWritesOnly`. There is no `kReadsOnly` or `kAllIo`, and no `rate_limiter_priority` on reads or on `WriteOptions`.
-- **The replay is not paced.** The flushes of the WAL replay inside `Open` do not go through the limiter. The recovery flushes of RocksDB do.
+- **The replay is not paced.** The flushes of the WAL replay during `Open` do not go through the limiter. The recovery flushes of RocksDB do.
 - **Fairness is fixed.** Every tenth refill serves the compactions first. RocksDB draws this at random, with a chance of one in ten.
-- **No `wal_bytes_per_sync`.** `BytesPerSync` applies to SSTables only. The WAL syncs whole write groups.
+- **No `wal_bytes_per_sync`.** `BytesPerSync` applies to SSTables only. A WAL sync covers a complete write group.
 
 ## Option validation
 
@@ -91,35 +91,37 @@ Solarium covers the part of RocksDB that the Raft log of Kommander and the backe
 
 ## Checkpoints
 
-- `CreateCheckpoint` links the SSTables, as RocksDB does. It copies them when the file system refuses the first link, as RocksDB does after its first `NotSupported`.
-- The checkpoint holds no WAL file. What the memtables hold at the sequence number of the checkpoint goes to new SSTables of the copy, and the source is not flushed. RocksDB copies its WAL files into the checkpoint while their total is below `log_size_for_flush`, and flushes the memtables of the source otherwise.
-- The `FORMAT` file is written last, so a checkpoint that was cut short does not open. RocksDB builds the checkpoint in a `.tmp` directory and renames it.
-- The checkpoint holds the `LOCK` of its directory while it writes, and the copy keeps the `LOCK` file.
+- `CreateCheckpoint` links the SSTables, as RocksDB does. It copies them when the file system does not allow the first link, as RocksDB does after its first `NotSupported`.
+- The checkpoint does not include a WAL file. What the memtables hold at the sequence number of the checkpoint goes to new SSTables of the copy, and the source is not flushed. RocksDB copies its WAL files into the checkpoint while their total is below `log_size_for_flush`, and flushes the memtables of the source otherwise.
+- The `FORMAT` file is written last, and a checkpoint that was cut short does not open. RocksDB builds the checkpoint in a `.tmp` directory and renames it.
+- The checkpoint locks its directory with `LOCK` while it writes, and the `LOCK` file remains in the copy.
 - `Dispose` stops a running checkpoint and waits for it. With RocksDB, closing the database during a checkpoint is an error of the caller.
 
 ## Close
 
-`Dispose` flushes the current WAL file before it closes it. So every write before a clean close survives a power loss after it. The close of RocksDB, with the WAL on, writes the WAL to the operating system without a flush (unless it uses direct I/O), and flushes no memtable. So its unsynced writes need `SyncWAL` first. A flush that fails at `Dispose` is reported after the close completes.
+`Dispose` flushes the current WAL file before it closes it. This means that every write before a clean close survives a power loss after it. The close of RocksDB, with the WAL on, writes the WAL to the operating system and does not flush it (unless it uses direct I/O). It also flushes no memtable. Unsynced writes in RocksDB need `SyncWAL` first. A flush that fails at `Dispose` is reported after the close completes.
 
 ## Reads
 
-- **`Prev`** searches every source for each step, so it is slower than `Next`.
-- **`MultiGet` reads blocks across tables.** It reads the data blocks of a round in one `IStorageEnvironment.MultiRead`, across every table that the round reaches. It has no `async_io` or `optimize_multiget_for_io` option. The `MultiGet` of RocksDB reads the blocks of one table with one `MultiRead` of its file. The `MultiRead` of the io_uring storage environment reads what the page cache holds on the calling thread first, with `preadv2(RWF_NOWAIT)`, and sends only the rest to the ring. The `PosixRandomAccessFile::MultiRead` of RocksDB submits every read to its io_uring.
-- **Memtable range tombstones.** The memtable indexes its range tombstones in runs of fragments that the range delete builds, in sizes that double, and a read searches each run. RocksDB caches the fragments of all the range tombstones of a memtable, which the first read after each range delete builds again, so that read pays for all of them. In Solarium, a range delete pays, at most once each time the count of tombstones doubles, and a read searches up to one run for each doubling.
+- **`Prev`** is slower than `Next`. It searches all the sources for each step.
+- **`MultiGet` reads blocks across tables.** It reads the data blocks of a round in one `IStorageEnvironment.MultiRead`, across the tables that the round reaches. There is no `async_io` or `optimize_multiget_for_io` option. The `MultiGet` of RocksDB reads the blocks of one table with one `MultiRead` of its file. The `MultiRead` of the io_uring storage environment first reads the bytes in the page cache on the calling thread, with `preadv2(RWF_NOWAIT)`. It sends only the rest to the ring. The `PosixRandomAccessFile::MultiRead` of RocksDB submits all its reads to its io_uring.
+- **Values in place go to a callback.** This applies to `TryGet`, and to `MultiGet` with a visitor, which are not in version 0.2.1. RocksDB gives out a `PinnableSlice`, which pins the value until the caller resets it. A handle that a caller forgets to release would hold its memtables and tables open, and one released twice would free them under a reader. A read in place pins its version during the callback, as an iterator does. A `PinnableSlice` pins a data block only, and RocksDB copies a value of a memtable into it.
+- **`MultiGet` with a visitor has no status for each key.** It visits the keys in the order in which they settle, whatever their order in the call. A round with a damaged block throws, and visits none of the keys whose blocks it read. RocksDB gives each key its own status.
+- **Memtable range tombstones.** The memtable indexes its range tombstones in runs of fragments. The range delete builds them, in sizes that double, and a read searches each one. RocksDB caches the fragments of all the range tombstones of a memtable. The first read after each range delete builds them again, and that read pays for all of them. In Solarium, a range delete pays, at most once each time the count of tombstones doubles, and a read searches up to one run for each doubling.
 
 ## Memory figures
 
-- `cur-size-all-mem-tables` counts the nodes of each memtable in its native arena: each key and value, a 24-byte header, and 8 bytes for each skip-list level, rounded up to 8. It also counts the range tombstones and their fragments. An empty memtable is 0. RocksDB counts the arena blocks that it allocated, 2 KB for an empty memtable. The arena also holds at most one partly used chunk of 64 KiB for each processor that wrote to the memtable.
+- `cur-size-all-mem-tables` counts the nodes of each memtable in its native arena: each key and value, a 24-byte header, and 8 bytes for each skip-list level, rounded up to 8. It also counts the range tombstones and their fragments. An empty memtable is 0. RocksDB counts the arena blocks that it allocated, 2 KB for an empty memtable. The arena also has at most one partly used chunk of 64 KiB for each processor that wrote to the memtable.
 - `estimate-table-readers-mem` counts the index keys and handles, the filter bits, and the range tombstones and their fragments of each open table. With `CacheIndexAndFilterBlocks`, it counts the range tombstones and their fragments only, as that of RocksDB leaves out the cached blocks.
 
 ## Group commit
 
 - **The WAL file after `Flush`** changes at the next write group.
 - **Commits are pipelined by default.** The `enable_pipelined_write` of RocksDB is off by default. In the `Put` benchmarks, pipelining makes 3 to 16 unsynced writers 5% to 15% faster, and 16 writers beside 16 readers 11% faster. It costs a single writer 1.5% to 1.7%. At 2 writers, the result changes with the build, from 8% faster to 7% slower. Because a group gives up its leadership after its WAL append, a full memtable is switched one group later than without pipelining, as in RocksDB.
-- **Concurrent memtable inserts.** In a group of several writers, the leader launches the inserts of the members that still spin, and inserts the batches of the blocked members itself. RocksDB launches every member. A blocked member must wake and get a CPU before it can insert. Where most waiting writers block, as on io_uring or beside readers, a launch for every member made writes up to 2.8 times slower (5.5 times beside 16 readers) than inserts by the leader alone.
-- **Publication.** The leader waits for the last insert and publishes the group. In RocksDB, the last writer to finish its insert publishes the group. The leader of Solarium holds the lock that keeps `Flush` from switching a memtable during the inserts, and that lock belongs to its thread. The `Flush` of RocksDB waits in the write queue instead.
+- **Concurrent memtable inserts.** In a group of several writers, the leader launches the inserts of the members that spin, and inserts the batches of the blocked members itself. RocksDB launches all members. A blocked member must wake and get a CPU before it can insert. Where most waiting writers block, as on io_uring or beside readers, the launch of all members made writes up to 2.8 times slower (5.5 times beside 16 readers) than inserts by the leader alone.
+- **Publication.** The leader waits for the last insert and publishes the group. In RocksDB, the last writer to finish its insert publishes the group. During the inserts, the leader of Solarium has a lock that stops `Flush` from switching a memtable, and that lock belongs to its thread. The `Flush` of RocksDB waits in the write queue instead.
 - **Wakes.** The leader of RocksDB wakes the writers of a group of 20 or more through about √n of them. The leader of Solarium wakes each one.
-- **Concurrent range deletes** go to a copy-on-write array under a small lock. RocksDB keeps them in a second skip list.
+- **Concurrent range deletes** go to a copy-on-write array under a small lock. In RocksDB, they go to a second skip list.
 - **A new writer can lead before the writer that got the offer.** A writer that arrives while no leader is active takes the queue and leads it. The writer that got the offer then waits for that group. A running writer starts the next group sooner than a blocked writer can wake up.
 
 ## Writer spin
@@ -128,11 +130,11 @@ A writer that waits for its group spins for up to 20 µs before it blocks, or fo
 
 RocksDB writers spin for about 1 µs (200 pause loops). Then, with `enable_write_thread_adaptive_yield` (on by default), they call `sched_yield` for up to `write_thread_max_yield_usec` (100 µs by default). They block after 3 yields that each take `write_thread_slow_yield_usec` (3 µs by default) or more. A credit, updated on one wait in 256, decides whether a writer yields at all.
 
-Solarium has no yields. In the `Put` benchmarks, yields after 1 µs or 5 µs made 16 writers on 16 CPUs 8% to 10% slower than a spin without yields. Solarium keeps the sampled credit of RocksDB, with the same decay of 1/1024. But the credit chooses between a spin of 20 µs and one of 1 µs, and it stops the long spin when more than about a quarter of the probes block. RocksDB uses half.
+Solarium does not yield. In the `Put` benchmarks, yields after 1 µs or 5 µs made 16 writers on 16 CPUs 8% to 10% slower than a spin without yields. Solarium uses the sampled credit of RocksDB, with the same decay of 1/1024. But the credit chooses between a spin of 20 µs and one of 1 µs, and it stops the long spin when more than about a quarter of the probes block. RocksDB uses half.
 
-Other details of the spin:
+The spin of Solarium also differs in how it takes samples and where its credit starts.
 
 - While the spin is short, Solarium probes in windows of long spins. RocksDB samples one wait at a time. On macOS (8 CPUs, 16 writers), single probes among short spins blocked 45% of the time, where a fixed 20 µs spin blocked 3%. So the spin stayed short, and each `Put` took about twice as long.
-- The credit of RocksDB starts at 0, so one early block stops its yields. The credit of Solarium starts 16 blocks above 0. On Linux, with six writers on one thread for each core on io_uring, a credit that started at 0 made 28% to 38% of the turns spin short, where a fixed 20 µs spin blocked on 12%.
+- The credit of RocksDB starts at 0, and one early block stops its yields. The credit of Solarium starts 16 blocks above 0. On Linux, with six writers on one thread for each core on io_uring, a credit that started at 0 made 28% to 38% of the turns spin short, where a fixed 20 µs spin blocked on 12%.
 - In the benchmarks, the long spin was faster where 13% or fewer of its spins blocked, and slower where 40% or more blocked.
-- With 16 readers beside 16 writers on 16 CPUs, the long spin costs the readers about 8% of their `Get` calls. Only 2% of its spins block there, so the credit keeps it.
+- With 16 readers beside 16 writers on 16 CPUs, the long spin costs the readers about 8% of their `Get` calls. Only 2% of its spins block there, and the credit does not stop the long spin.

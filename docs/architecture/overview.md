@@ -8,7 +8,7 @@ Solarium is a **log-structured merge-tree** (LSM tree): a store that writes chan
 
 ## The parts
 
-A write goes through the write queue to the WAL and the active memtable. Background threads then flush the memtable and compact the SSTables:
+A write goes through the write queue to the WAL and the active memtable. Background threads then flush the memtable and compact the SSTables.
 
 ```mermaid
 flowchart LR
@@ -20,7 +20,7 @@ flowchart LR
     L0 -- compaction threads --> LS[Levels 1 to 6]
 ```
 
-A read takes the current version of a column family, and searches its sources from the newest to the oldest:
+A read takes the current version of a column family, and searches its sources from the newest to the oldest.
 
 ```mermaid
 flowchart LR
@@ -36,21 +36,21 @@ The manifest records the live files, and the storage environment does all file I
 | Part | Role | Details |
 | --- | --- | --- |
 | **Write queue** | Groups concurrent writers. A leader writes their records to the WAL in one append. | [Write Path](write-path.md) |
-| **WAL** | One log for all column families. One record holds one whole batch. | [WAL and Recovery](wal-and-recovery.md) |
+| **WAL** | One log for all column families. One record is one batch. | [WAL and Recovery](wal-and-recovery.md) |
 | **Memtable** | A lock-free skip list in memory, one active for each column family. | [Memtable](memtable.md) |
 | **Version** | An immutable list of the memtables and SSTables of a column family. A read uses one version. | [Read Path](read-path.md) |
 | **Flush thread** | Writes immutable memtables to level 0 SSTables. | [Flushes](flushes.md) |
 | **Compaction threads** | Merge and move SSTables down the seven levels, up to `MaxBackgroundCompactions` at once. | [Compaction](compaction.md) |
 | **SSTable** | An immutable sorted file with data blocks, and an index and Bloom filters cut into partitions. | [SSTables](sstables.md) |
-| **Block cache** | Optional. Holds the index and filter partitions of the SSTables, and can hold the memtable budget too. | [Block Cache and Memtable Budget](../guides/memory.md) |
+| **Block cache** | Optional. A cache for the index and filter partitions of the SSTables. It can hold the memtable budget too. | [Block Cache and Memtable Budget](../guides/memory.md) |
 | **Manifest** | The list of live WAL files, column families, SSTables, and flush points. | [Data Directory](../reference/data-directory.md) |
 | **Storage environment** | All file I/O: default or io_uring. | [Storage Environments](storage-environments.md) |
 
 ## Sequence numbers
 
-Every operation of every batch gets a **sequence number**. All column families share one sequence. A batch takes consecutive numbers: operation `i` of a batch has the number `first + i`.
+Each operation of a batch gets a **sequence number**. All column families share one sequence. A batch takes consecutive numbers: operation `i` of a batch has the number `first + i`.
 
-Sequence numbers do three jobs:
+Reads and recovery use the sequence numbers to decide which entries apply.
 
 - **Order.** For each key, a higher sequence number is a newer version.
 - **Visibility.** The database publishes the last sequence number of a group after every entry of the group is in the memtables. A read takes the last published number as its snapshot and skips newer entries.
@@ -58,17 +58,17 @@ Sequence numbers do three jobs:
 
 ## Internal keys
 
-The memtables and SSTables store **internal keys**: the user key, the sequence number, and the kind (put, delete, or range delete). Internal keys sort by the user key first, then by the sequence number from the newest to the oldest. So the versions of one key are next to each other, the newest first.
+The memtables and SSTables store **internal keys**: the user key, the sequence number, and the kind (put, delete, or range delete). Internal keys sort by the user key. For one user key, they sort by the sequence number, from the newest to the oldest. This means that the versions of one key are next to each other, the newest first.
 
 ## Versions
 
-Each column family has a **version**, like the `SuperVersion` of RocksDB. A version lists:
+Each column family has a **version**, like the `SuperVersion` of RocksDB. A version lists the sources that a read searches.
 
 - the active memtable;
 - the immutable memtables that wait for a flush;
 - the SSTables of each level.
 
-A version never changes after it is published. A memtable switch, a finished flush, or a finished compaction publishes a new version. Readers count themselves into the version that they read, and out when they are done. A file stays open until the last version that lists it has no readers and is replaced.
+A version does not change after it is published. A memtable switch publishes a new version, and so does a finished flush or a finished compaction. Readers count themselves into the version that they read, and out when they are done. A file is closed when the last version that lists it has no readers and is replaced.
 
 ## Threads
 
@@ -92,11 +92,19 @@ Reads take none of these locks. A block cache has a lock for each of its shards,
 
 ## RocksDB design and differences
 
-The design follows RocksDB in each part: group commit with pipelined writes, the skip-list memtable, the `SuperVersion`, leveled compaction with dynamic level sizing, a rate limiter for flush and compaction writes, fragmented range tombstones, and the property names. The main differences are:
+Each part follows the design of RocksDB.
 
-- one thread for each merge (no subcompactions), and one flush thread;
-- a block cache that holds data blocks only with `CacheDataBlocks`, off by default;
-- a WAL record with a durable offset;
-- a manifest that is written again whole on each change.
+- Writes use group commit with pipelined writes.
+- The memtable is a skip list, and range tombstones are cut into fragments.
+- A version works like the `SuperVersion`.
+- Compaction is leveled, with dynamic level sizing. A rate limiter can pace the writes of flushes and compactions.
+- The property names are the same.
 
-[Differences from RocksDB](../reference/rocksdb-differences.md) lists every difference.
+The threads, the caching of data blocks, and two of the files differ from RocksDB.
+
+- A merge has one thread (no subcompactions), and all flushes share one thread.
+- The block cache takes data blocks only with `CacheDataBlocks`, off by default.
+- A WAL record has a durable offset.
+- The manifest is rewritten on each change.
+
+[Differences from RocksDB](../reference/rocksdb-differences.md) is the complete list.

@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Diagnostics
 
-When writes slow down or memory grows, you need to see what the engine is doing. Solarium reports the files in each level, the memtable sizes, the pending flushes and compactions, and the write stalls. It uses the property names of RocksDB, so code that reads RocksDB properties, such as Kommander, reads Solarium too. [Properties](../reference/properties.md) lists each property.
+When writes slow down or memory grows, you need to see what the engine is doing. Solarium has properties for the files in each level, the memtable sizes, the pending flushes and compactions, and the write stalls. They have the property names of RocksDB. This means that code that reads RocksDB properties, such as Kommander, reads Solarium too. [Properties](../reference/properties.md) lists each property.
 
 ## Read a property
 
@@ -58,13 +58,13 @@ foreach (LiveFileMetaData file in db.GetLiveFilesMetaData())
         $"seq {file.SmallestSequenceNumber}..{file.LargestSequenceNumber} entries {file.EntryCount}");
 ```
 
-`GetLiveFilesMetaData` lists every live SSTable of every column family, in the order of the manifest: level 0 newest first, then each of levels 1 to 6 in key order. Each entry has:
+`GetLiveFilesMetaData` lists every live SSTable of all the column families, in the order of the manifest. Level 0 comes newest first. Levels 1 to 6 follow, each in key order. An entry describes one SSTable.
 
-- the column family, the level, the file name (with a leading slash, as RocksDB gives it: `/000012.sst`), and the file number;
-- the size in bytes;
-- the smallest and largest user keys. The largest key can be the exclusive end of a range tombstone;
-- the lowest and highest sequence numbers;
-- the point entries: puts and deletes.
+- The column family, the level, the file name (with a leading slash, as RocksDB gives it: `/000012.sst`), and the file number.
+- The size in bytes.
+- The smallest and largest user keys. The largest key can be the exclusive end of a range tombstone.
+- The lowest and highest sequence numbers.
+- The point entries: puts and deletes.
 
 The keys are copies that belong to you.
 
@@ -74,6 +74,6 @@ The keys are copies that belong to you.
 
 ## Memory figures differ from RocksDB
 
-- `cur-size-all-mem-tables` counts the nodes of each memtable in its native arena: each key and value, a 24-byte header, and 8 bytes for each skip-list level, rounded up to 8. It also counts the range tombstones and their fragments. An empty memtable is 0. RocksDB counts the arena blocks that it allocated, 2 KB for an empty memtable. The arena also holds at most one partly used chunk of 64 KiB for each processor that wrote to the memtable.
-- `estimate-table-readers-mem` counts the index keys and handles, the filter bits, and the range tombstones and their fragments of each open table. It does not count allocations.
-- `block-cache-capacity`, `block-cache-usage`, and `block-cache-pinned-usage` return null for a column family without a `BlockCache`, as in RocksDB with no block cache.
+- `cur-size-all-mem-tables` counts the nodes of each memtable in its native arena. A node is the key and value, a 24-byte header, and 8 bytes for each skip-list level, rounded up to 8. The property also counts the range tombstones and their fragments. An empty memtable is 0. RocksDB counts the arena blocks that it allocated, 2 KB for an empty memtable. The arena also includes at most one partly used chunk of 64 KiB for each processor that wrote to the memtable.
+- `estimate-table-readers-mem` counts the index keys and handles of each open table and its filter bits. It also counts the range tombstones and their fragments. It does not count allocations.
+- `block-cache-capacity`, `block-cache-usage`, and `block-cache-pinned-usage` return null for a column family that does not have a `BlockCache`, as in RocksDB.

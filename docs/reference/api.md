@@ -6,7 +6,7 @@ sidebar_position: 1
 
 The public API of Solarium follows the names and semantics of RocksDB. This page lists each public member, with its RocksDB equivalent. Where there is a difference, the table says so.
 
-Every member is safe to call from any thread, except that you must use one `Iterator` from one thread at a time.
+You can call the members of `SolariumDb` from any thread. Use each `Iterator` and each `WriteBatch` from one thread at a time.
 
 ## SolariumDb
 
@@ -16,7 +16,7 @@ The namespace is `Solarium`.
 
 | Member | Description | RocksDB equivalent |
 | --- | --- | --- |
-| `static SolariumDb Open(string path, DbOptions? options = null, IEnumerable<string>? columnFamilies = null)` | Opens the database in `path`. Every column family that exists opens. `columnFamilies` names the ones that must exist. | `RocksDb.Open` with `CreateIfMissing` and `CreateMissingColumnFamilies` |
+| `static SolariumDb Open(string path, DbOptions? options = null, IEnumerable<string>? columnFamilies = null)` | Opens the database in `path`, with all its existing column families. `columnFamilies` names the ones that must exist. | `RocksDb.Open` with `CreateIfMissing` and `CreateMissingColumnFamilies` |
 | `void Dispose()` | Waits for the write and the flush in progress, stops the compaction in progress, flushes the current WAL file, closes the files, and releases the directory lock. | `Close`, but with a WAL flush (see [Differences](rocksdb-differences.md)) |
 
 ### Column families
@@ -24,7 +24,7 @@ The namespace is `Solarium`.
 | Member | Description |
 | --- | --- |
 | `ColumnFamily DefaultColumnFamily` | The column family that operations use when they pass none. It always exists. |
-| `IReadOnlyCollection<ColumnFamily> ColumnFamilies` | Every column family of the database, the default one included. |
+| `IReadOnlyCollection<ColumnFamily> ColumnFamilies` | The column families of the database, the default one included. |
 | `ColumnFamily GetColumnFamily(string name)` | The column family with this name. Throws `KeyNotFoundException` when there is none. |
 
 ### Writes
@@ -33,7 +33,7 @@ The namespace is `Solarium`.
 | --- | --- | --- |
 | `void Put(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value, ColumnFamily? family = null, WriteOptions? options = null)` | Sets the key to the value, as a batch of one operation. | `Put` |
 | `void Delete(ReadOnlySpan<byte> key, ColumnFamily? family = null, WriteOptions? options = null)` | Deletes the key. | `Delete` |
-| `void DeleteRange(ReadOnlySpan<byte> begin, ReadOnlySpan<byte> end, ColumnFamily? family = null, WriteOptions? options = null)` | Deletes every key in `[begin, end)`. An empty range writes nothing. | `DeleteRange`. An end before the begin throws `ArgumentException`, where RocksDB fails the write with `InvalidArgument`. |
+| `void DeleteRange(ReadOnlySpan<byte> begin, ReadOnlySpan<byte> end, ColumnFamily? family = null, WriteOptions? options = null)` | Deletes the keys in `[begin, end)`. An empty range makes no write. | `DeleteRange`. An end before the begin throws `ArgumentException`, where RocksDB fails the write with `InvalidArgument`. |
 | `void Write(WriteBatch batch, WriteOptions? options = null)` | Applies the batch atomically. It is visible to reads when `Write` returns. | `Write`, with `WriteOptions.Sync` |
 
 ### Reads
@@ -42,8 +42,39 @@ The namespace is `Solarium`.
 | --- | --- | --- |
 | `byte[]? Get(ReadOnlySpan<byte> key, ColumnFamily? family = null, ReadOptions? options = null)` | The newest value of the key, or null when the key is absent or deleted. The array belongs to the caller. | `Get`. Of the read options, only `fill_cache` applies. |
 | `byte[]?[] MultiGet(IReadOnlyList<byte[]> keys, ColumnFamily? family = null, ReadOptions? options = null)` | Looks up several keys of one column family at one snapshot. It reads the data blocks of its keys together, through `IStorageEnvironment.MultiRead`. | `MultiGet`. Of the read options, only `fill_cache` applies. |
+| `bool TryGet<TResult>(ReadOnlySpan<byte> key, ValueReader<TResult> reader, out TResult result, ColumnFamily? family = null, ReadOptions? options = null)` | Gives the newest value of the key to `reader`, in place and with no copy. True when the key has a value. Not in version 0.2.1. See [Reads in place](#reads-in-place). | `Get` into a `PinnableSlice`. Of the read options, only `fill_cache` applies. |
+| `void MultiGet<TState>(IReadOnlyList<byte[]> keys, TState state, ValueVisitor<TState> visitor, ColumnFamily? family = null, ReadOptions? options = null)` | Looks up several keys of one column family at one snapshot, and gives each value to `visitor`, in place and with no copy. Not in version 0.2.1. See [Reads in place](#reads-in-place). | `MultiGet` into `PinnableSlice`s. Of the read options, only `fill_cache` applies. |
 | `Iterator NewIterator(ColumnFamily? family = null, ReadOptions? options = null)` | Creates an iterator over a snapshot of the column family. The caller disposes it. | `NewIterator`, with `iterate_upper_bound` and `fill_cache` |
 | `long LatestSequenceNumber` | The sequence number of the newest write that reads can see. | `GetLatestSequenceNumber` |
+
+### Reads in place
+
+`Get` copies the value into a new array. `TryGet`, and `MultiGet` with a visitor, give the value to a callback and do not copy it. Use them when you need a few bytes of a large value. These two members are in the source repository after version 0.2.1, and the 0.2.1 packages do not have them.
+
+```csharp
+// The first 8 bytes of the value. A static lambda allocates nothing.
+bool found = db.TryGet("log:0001"u8,
+    static value => BinaryPrimitives.ReadInt64LittleEndian(value), out long term);
+
+long[] terms = new long[keys.Count];
+db.MultiGet(keys, terms,
+    static (index, value, terms) => terms[index] = BinaryPrimitives.ReadInt64LittleEndian(value));
+```
+
+| Delegate | Description |
+| --- | --- |
+| `TResult ValueReader<out TResult>(ReadOnlySpan<byte> value)` | Reads the value for `TryGet`, and returns the result. |
+| `void ValueVisitor<in TState>(int index, ReadOnlySpan<byte> value, TState state)` | Reads one value for `MultiGet`. `index` is the place of its key in `keys`. `state` is the state that you passed. |
+
+- The value belongs to the engine, and is valid only until the callback returns. Copy what you need after that.
+- The callback is called for a key that has a value. It is not called for a key that is absent or deleted.
+- `MultiGet` calls the visitor once for each key that has a value, in no set order. A key that is in `keys` twice counts twice.
+- The callback executes on the calling thread, under no lock, and it can call the database.
+- A callback should be short. The memtables and the SSTables of the snapshot remain in use until the call returns, as with an open iterator.
+- An exception from the callback ends the call and goes to the caller.
+- Damage to a table throws `SolariumException`. `TryGet` does not call its reader in that case. `MultiGet` may have called the visitor for other keys.
+
+RocksDB gives the caller a handle on the value. [Differences from RocksDB](rocksdb-differences.md#reads) explains why Solarium uses a callback.
 
 ### Maintenance
 
@@ -52,28 +83,28 @@ The namespace is `Solarium`.
 | `void Flush(ColumnFamily? family = null, bool wait = true)` | Makes the memtable immutable and flushes it to an SSTable. With `wait`, returns when the data is durable in an SSTable. | `Flush` with `FlushOptions.wait` |
 | `void CompactRange(byte[]? begin, byte[]? end, ColumnFamily? family = null)` | Compacts the range one level after the other, down to the bottom level. Null is an open end. | `CompactRange`, without the flush of an overlapping memtable first |
 | `void DeleteFilesInRange(byte[]? begin, byte[]? end, ColumnFamily? family = null, bool includeEnd = true)` | Drops the SSTables of levels 1 to 6 whose keys all lie in the range. | `DeleteFilesInRange`. `includeEnd` is true by default, as in the C API of RocksDB. |
-| `void CreateCheckpoint(string directory)` | Writes a consistent copy of the database to a new directory. | `Checkpoint::CreateCheckpoint`. Its SSTables are links, or copies across file systems, and it holds no WAL file. |
+| `void CreateCheckpoint(string directory)` | Writes a consistent copy of the database to a new directory. | `Checkpoint::CreateCheckpoint`. Its SSTables are links, or copies across file systems. It does not include a WAL file. |
 
 ### Diagnostics
 
 | Member | Description | RocksDB equivalent |
 | --- | --- | --- |
 | `string? GetProperty(string name, ColumnFamily? family = null)` | The value of a RocksDB property as a decimal integer, or null for a name that is not supported. See [Properties](properties.md). | `GetProperty`, for the integer properties |
-| `List<LiveFileMetaData> GetLiveFilesMetaData()` | Every live SSTable of every column family. | `GetLiveFilesMetaData` |
+| `List<LiveFileMetaData> GetLiveFilesMetaData()` | The live SSTables of all column families. | `GetLiveFilesMetaData` |
 
 ## WriteBatch
 
-Writes that apply all together or not at all, across any number of column families of one database. The batch copies keys and values when you add them.
+Writes that apply all together or not at all, across any number of column families of one database. The batch copies keys and values when you add them. Use one batch from one thread at a time.
 
 | Member | Description |
 | --- | --- |
 | `WriteBatch Put(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value, ColumnFamily? family = null)` | Adds a put. Returns the batch. |
 | `WriteBatch Delete(ReadOnlySpan<byte> key, ColumnFamily? family = null)` | Adds a delete. |
-| `WriteBatch DeleteRange(ReadOnlySpan<byte> begin, ReadOnlySpan<byte> end, ColumnFamily? family = null)` | Adds a range delete. An empty range adds nothing. An end before the begin throws `ArgumentException`, and the batch does not change. |
+| `WriteBatch DeleteRange(ReadOnlySpan<byte> begin, ReadOnlySpan<byte> end, ColumnFamily? family = null)` | Adds a range delete. An empty range does not add an operation. An end before the begin throws `ArgumentException`, and the batch does not change. |
 | `int Count` | The number of operations. |
-| `long Sequence` | The sequence number of the first operation, set when `Write` returns. The operations hold `Sequence` to `Sequence + Count - 1`. 0 for a batch that was never written. With a synced write, every sequence number at or below the last of the batch is durable when `Write` returns. RocksDB writes the same number into the header of a batch (`WriteBatchInternal::Sequence`). |
-| `long GroupLastSequence` | The last sequence number of the write group that carried the batch, set with `Sequence`. With a synced write, every sequence number at or below it is durable when `Write` returns, so the writers of a group can record one number between them. A later unsynced group can raise the latest sequence number of the database above it. 0 for a batch that was never written. RocksDB keeps this number in `WriteThread::WriteGroup::last_sequence` and does not expose it. |
-| `void Clear()` | Removes every operation, so you can use the batch again. |
+| `long Sequence` | The sequence number of the first operation, set when `Write` returns. The operations have the numbers `Sequence` to `Sequence + Count - 1`. 0 for a batch that was never written. With a synced write, every sequence number at or below the last of the batch is durable when `Write` returns. RocksDB writes the same number into the header of a batch (`WriteBatchInternal::Sequence`). |
+| `long GroupLastSequence` | The last sequence number of the write group that carried the batch, set with `Sequence`. With a synced write, every sequence number at or below it is durable when `Write` returns. This lets the writers of a group record one number between them. A later unsynced group can raise the latest sequence number of the database above it. 0 for a batch that was never written. The RocksDB equivalent is `WriteThread::WriteGroup::last_sequence`, which RocksDB does not expose. |
+| `void Clear()` | Removes the operations from the batch. You can use the batch again. |
 
 ## Iterator
 
@@ -89,7 +120,7 @@ An ordered cursor over one column family, at the snapshot taken when it was crea
 | `void SeekToLast()` | Moves to the last key, or to the last key before the upper bound. |
 | `void Next()` | Moves to the next key. Throws `InvalidOperationException` when the iterator is not valid. |
 | `void Prev()` | Moves to the previous key. Throws `InvalidOperationException` when the iterator is not valid. |
-| `void Dispose()` | Releases the snapshot and its SSTables. Later calls do nothing. |
+| `void Dispose()` | Releases the snapshot and its SSTables. Later calls have no effect. |
 
 The seek methods throw `ObjectDisposedException` after `Dispose`.
 
@@ -97,7 +128,7 @@ The seek methods throw `ObjectDisposedException` after `Dispose`.
 
 | Member | Description |
 | --- | --- |
-| `const string DefaultName` | `"default"`, the name of the column family that every database has. |
+| `const string DefaultName` | `"default"`, the name of the column family that always exists. |
 | `string Name` | The name of the column family. |
 
 ## Options records
@@ -111,11 +142,11 @@ The seek methods throw `ObjectDisposedException` after `Dispose`.
 | `CompressionType` | `None` (0) or `Lz4` (1). |
 | `RateLimiter` | Paces flush and compaction writes, for `DbOptions.RateLimiter`. See [Options](options.md#ratelimiter). |
 | `Cache` | An LRU cache for index and filter blocks, and for data blocks with `CacheDataBlocks`, for `ColumnFamilyOptions.BlockCache`. See [Options](options.md#cache). |
-| `WriteBufferManager` | A cap on the memtables of every database that shares it, for `DbOptions.WriteBufferManager`. See [Options](options.md#writebuffermanager). |
+| `WriteBufferManager` | A cap on the total memtable memory of the databases that share it, for `DbOptions.WriteBufferManager`. See [Options](options.md#writebuffermanager). |
 
 ## LiveFileMetaData
 
-A record for one live SSTable, from `GetLiveFilesMetaData`:
+`GetLiveFilesMetaData` returns one record for each live SSTable.
 
 | Member | Description |
 | --- | --- |

@@ -5,13 +5,13 @@ description: The storage terms used across the Solarium docs, in plain language,
 
 # Key Concepts
 
-Solarium is a log-structured store. Words such as WAL, memtable, SSTable, compaction, and range tombstone appear across these docs, in the options, and in the properties that the database reports. When you know them, you can predict what a write survives, why a write slows down, and when disk space comes back.
+Solarium is a log-structured store. Words such as WAL and compaction appear across these docs, in the options, and in the property names of the database. When you know them, you can predict what a write survives, why a write slows down, and when disk space comes back.
 
 Each term gets a short definition, a comparison with a familiar tool where that helps, and a link to the page with the details.
 
 ## The big picture
 
-A database with two column families looks like this:
+In a database with two column families, the WAL and the manifest are shared. The memtables and the SSTables are separate.
 
 ```mermaid
 flowchart TB
@@ -36,41 +36,41 @@ A batch goes to the WAL first, as one record. Then each of its operations goes t
 
 ### Database and data directory {#database}
 
-A database is one directory on disk. Your process opens it with `SolariumDb.Open`, and reads and writes it directly, like a SQLite file. There is no server. Only one open database can use a directory at a time, because `Open` takes the `LOCK` file. See [Data Directory](reference/data-directory.md).
+A database is one directory on disk. Your process opens it with `SolariumDb.Open`, and reads and writes it directly, like a SQLite file. There is no server. `Open` takes the `LOCK` file of the directory. This means that only one open database can use a directory at a time. See [Data Directory](reference/data-directory.md).
 
 ### Key and value {#key-and-value}
 
-A key and a value are byte arrays. Keys sort by their bytes, so `log:0002` comes before `log:0010`, but `log:2` comes after `log:10`. Use fixed-width ids, such as zero-padded numbers, when you want them to sort in numeric order.
+A key and a value are byte arrays. Keys sort by their bytes: `log:0002` comes before `log:0010`, but `log:2` comes after `log:10`. Use fixed-width ids, such as zero-padded numbers, when you want them to sort in numeric order.
 
 ### Column family {#column-family}
 
-A column family is a named, ordered key space inside one database. It is like a separate table in one SQLite file. Each column family has its own memtables, its own SSTables, and its own options. All column families share one WAL, so one batch can write to several of them atomically. See [Column Families](guides/column-families.md).
+A column family is a named, ordered key space in a database. It is like a separate table in one SQLite file. Each column family has separate memtables and SSTables, and separate options. All column families share one WAL. This means that one batch can write to several of them atomically. See [Column Families](guides/column-families.md).
 
 ### Write batch {#write-batch}
 
-A write batch is a group of puts, deletes, and range deletes that lands whole, or not at all. It is like a database transaction that only writes. Every write in Solarium is a batch: `Put` on the database is a batch of one operation. See [Writes and Batches](guides/writes-and-batches.md).
+A write batch is a group of puts, deletes, and range deletes. All of them apply, or none of them do. A batch is like a database transaction that only writes. Every write in Solarium is a batch: `Put` on the database is a batch of one operation. See [Writes and Batches](guides/writes-and-batches.md).
 
 ### Sequence number {#sequence-number}
 
-Every operation of every batch gets a sequence number, from one counter that only grows. All column families share it. For each key, a higher sequence number is a newer version. A batch takes consecutive numbers. See [Architecture Overview](architecture/overview.md#sequence-numbers).
+Each operation of a batch gets a sequence number, from one counter that only grows. All column families share it. For each key, a higher sequence number is a newer version. A batch takes consecutive numbers. See [Architecture Overview](architecture/overview.md#sequence-numbers).
 
 ### Snapshot {#snapshot}
 
-A snapshot is the sequence number that a read sees the database at. A read takes the latest published sequence number. It sees every write at or below that number, and no write above it. So a read never sees part of a batch. See [Reads and Iterators](guides/reads-and-iterators.md#snapshots).
+A snapshot is the sequence number that a read sees the database at. A read takes the latest published sequence number. It sees every write at or below that number, and no write above it. This means that a read cannot see part of a batch. See [Reads and Iterators](guides/reads-and-iterators.md#snapshots).
 
 ### Iterator {#iterator}
 
-An iterator is an ordered cursor over one column family at one snapshot, like a `SortedDictionary` enumerator that ignores later changes. It can seek, step forward, step back, and stop at an upper bound. An iterator keeps the files of its snapshot on disk until you dispose it. See [Reads and Iterators](guides/reads-and-iterators.md#iterators).
+An iterator is an ordered cursor over one column family at one snapshot, like a `SortedDictionary` enumerator that ignores later changes. It can seek to a key and step in both directions, and it can stop at an upper bound. The files of its snapshot are not deleted from disk until you dispose it. See [Reads and Iterators](guides/reads-and-iterators.md#iterators).
 
 ## Durability
 
 ### Write-ahead log {#wal}
 
-The write-ahead log (WAL) is a file that only grows. Every batch goes to it as one record before it goes to a memtable. After a crash, the open replays the WAL to rebuild what was in memory. All column families share one WAL. See [WAL and Recovery](architecture/wal-and-recovery.md).
+The write-ahead log (WAL) is a file that only grows. A batch goes to it as one record before it goes to a memtable. After a crash, the open replays the WAL to rebuild what was in memory. All column families share one WAL. See [WAL and Recovery](architecture/wal-and-recovery.md).
 
 ### Fsync and the page cache {#fsync}
 
-When a process writes to a file, the operating system first keeps the bytes in memory, in the page cache. An fsync, or a flush to the device, tells the operating system to write them to the drive and wait. An fsync takes far longer than a write to the page cache. By default, Solarium does not cache SSTable data blocks itself, so the page cache is their only cache. `CacheDataBlocks` keeps them in a block cache too. See [Tuning](operations/tuning.md#memory).
+When a process writes to a file, the bytes go first to the page cache, which is memory of the operating system. An fsync, or a flush to the device, tells the operating system to write them to the drive and wait. An fsync takes far longer than a write to the page cache. By default, Solarium does not cache SSTable data blocks itself, and the page cache is their only cache. `CacheDataBlocks` puts them in a block cache too. See [Tuning](operations/tuning.md#memory).
 
 ### Synced and unsynced write {#synced-and-unsynced-write}
 
@@ -78,7 +78,7 @@ A synced write (`WriteOptions.Synced`) flushes the WAL to the device before `Wri
 
 ### Process crash and power loss {#process-crash-and-power-loss}
 
-The two failures differ in what they can lose:
+After `Write` returns, a power loss can lose an unsynced write. A process crash does not lose it.
 
 | Event | Synced write | Unsynced write |
 | --- | --- | --- |
@@ -86,21 +86,21 @@ The two failures differ in what they can lose:
 | Power loss, after `Write` returns | Survives | Can be lost |
 | Power loss, after a clean `Dispose` | Survives | Survives |
 
-A process crash leaves the page cache in place, so the operating system still writes the record. A power loss can lose any sector written since the last fsync. See [Durability](operations/durability.md).
+A process crash leaves the page cache in place, and the operating system writes the record to the drive later. A power loss can lose any sector written since the last fsync. See [Durability](operations/durability.md).
 
 ### Group commit {#group-commit}
 
-Group commit lets many writer threads share one WAL append and one fsync. Concurrent writers form a group, and one leader writes the records of the whole group. Sixteen synced writers in one group share one fsync. See [Write Path](architecture/write-path.md).
+Group commit lets many writer threads share one WAL append and one fsync. Concurrent writers form a group, and one leader writes the records of the group. Sixteen synced writers in one group share one fsync. See [Write Path](architecture/write-path.md).
 
 ### Recovery and the durable offset {#recovery}
 
-At open, Solarium replays the WAL files in order. Each WAL record carries a durable offset: how much of its file an fsync made durable when the record was appended. With it, recovery tells the damage that a crash or a power loss can leave from damage that no crash explains. Recovery cuts a torn tail of the newest WAL file. It refuses to open for damage that no crash explains, and drops no data. RocksDB has no such field. See [WAL and Recovery](architecture/wal-and-recovery.md#recovery-rules).
+At open, Solarium replays the WAL files in order. Each WAL record carries a durable offset: how much of its file an fsync made durable when the record was appended. With it, recovery tells the damage that a crash or a power loss can leave from damage that no crash explains. Recovery cuts a torn tail of the newest WAL file. The open fails on damage that no crash explains, and drops no data. RocksDB does not have this field. See [WAL and Recovery](architecture/wal-and-recovery.md#recovery-rules).
 
 ## Storage on disk
 
 ### Memtable {#memtable}
 
-A memtable is a sorted structure in memory, a lock-free skip list, that holds the newest writes of one column family. Reads search it with no lock. When it reaches `WriteBufferSize`, it becomes immutable, and a new active memtable takes the writes. See [Memtable](architecture/memtable.md).
+A memtable is a sorted structure in memory for the newest writes of one column family. It is a lock-free skip list, and reads search it with no lock. When it reaches `WriteBufferSize`, it becomes immutable. A new active memtable then takes the writes. See [Memtable](architecture/memtable.md).
 
 ### Flush {#flush}
 
@@ -108,24 +108,24 @@ A flush writes an immutable memtable to disk as a level 0 SSTable. After the flu
 
 ### SSTable {#sstable}
 
-A sorted string table (SSTable) is a file of sorted keys and values that never changes after it is written. It holds data blocks, an index of the blocks, and Bloom filters that skip files without the key. The index and the filters are cut into partitions of about 4 KB. A compaction writes new SSTables in place of old ones. See [SSTables](architecture/sstables.md).
+A sorted string table (SSTable) is a file of sorted keys and values that does not change after it is written. It contains data blocks and an index of the blocks. It also contains Bloom filters, which let a read skip a file that does not have the key. The index and the filters are cut into partitions of about 4 KB. A compaction writes new SSTables in place of old ones. See [SSTables](architecture/sstables.md).
 
 ### Level {#level}
 
-Each column family keeps its SSTables in seven levels, 0 to 6:
+The SSTables of a column family are in seven levels, 0 to 6.
 
-- **Level 0** holds the flushed memtables. Its files can overlap.
-- **Levels 1 to 6** hold sorted files. In each level, the files share no key.
+- **Level 0** contains the flushed memtables. Its files can overlap.
+- **Levels 1 to 6** contain sorted files. In each level, the files share no key.
 
-For each key, every version in a level is newer than every version in the levels below it. Level 6 is the bottom level, and it holds most of the data. See [Compaction](architecture/compaction.md#the-levels).
+For each key, the versions in a level are newer than the versions in the levels below it. Level 6 is the bottom level, where most of the data is. See [Compaction](architecture/compaction.md#the-levels).
 
 ### Compaction {#compaction}
 
-A compaction merges SSTables into the level below. It keeps the newest version of each key, and drops old versions and deleted keys. So a read searches fewer files, and disk space comes back. Compactions run on background threads, up to `MaxBackgroundCompactions` at once. Each merge runs on one thread. See [Flushes and Compaction](guides/flushes-and-compaction.md#compaction).
+A compaction merges SSTables into the level below. The newest version of each key remains. Old versions and deleted keys are dropped. As a result, a read searches fewer files, and disk space comes back. Compactions run on background threads, up to `MaxBackgroundCompactions` at once. Each merge runs on one thread. See [Flushes and Compaction](guides/flushes-and-compaction.md#compaction).
 
 ### Trivial move {#trivial-move}
 
-A trivial move takes a file that overlaps nothing in the level below, and moves it down as it is. It costs one manifest save and no rewrite. A Raft log appends keys that grow, so its files reach level 6 this way, with no compaction writes. See [Trivial moves](guides/flushes-and-compaction.md#trivial-moves).
+A trivial move takes a file that does not overlap any file in the level below, and moves it down as it is. It costs one manifest save and no rewrite. A Raft log appends keys that grow. Its files reach level 6 this way, with no compaction writes. See [Trivial moves](guides/flushes-and-compaction.md#trivial-moves).
 
 ### Manifest {#manifest}
 
@@ -133,43 +133,43 @@ The manifest is the file `MANIFEST`. It lists the live WAL files, the column fam
 
 ### Version {#version}
 
-A version is an immutable list of the memtables and SSTables of a column family, like the `SuperVersion` of RocksDB. A read uses one version from start to end. A flush or a compaction publishes a new version, and a file stays on disk until no version that lists it has readers. See [Read Path](architecture/read-path.md).
+A version is an immutable list of the memtables and SSTables of a column family, like the `SuperVersion` of RocksDB. A read uses one version from start to end. A flush or a compaction publishes a new version. A file is not deleted from disk while a version that lists it has readers. See [Read Path](architecture/read-path.md).
 
 ## Deletes
 
 ### Tombstone {#tombstone}
 
-SSTables never change, so a delete writes a tombstone: a marker with a sequence number that hides the older versions of the key. A compaction drops the tombstone when no older version of the key remains below it.
+SSTables do not change after they are written. A delete writes a tombstone, which is a marker with a sequence number that hides the older versions of the key. A compaction drops the tombstone when no older version of the key remains below it.
 
 ### Range tombstone {#range-tombstone}
 
-A range tombstone, from `DeleteRange`, hides every older version of every key in a range, with one write. A Raft log uses it to drop millions of old entries at once. Reads find the tombstones that cover a key with a binary search over fragments that do not overlap. See [Range Deletes](guides/range-deletes.md).
+A range tombstone, from `DeleteRange`, hides the older versions of all the keys in a range, with one write. A Raft log uses it to drop millions of old entries at once. Reads find the tombstones that cover a key with a binary search over fragments that do not overlap. See [Range Deletes](guides/range-deletes.md).
 
 ### DeleteFilesInRange {#deletefilesinrange}
 
-`DeleteFilesInRange` drops, in one manifest save, the SSTables of levels 1 to 6 whose keys all lie in a range. The space comes back at once, with no rewrite. It ignores sequence numbers, so use it only for keys that you no longer read. See [Range Deletes](guides/range-deletes.md).
+`DeleteFilesInRange` drops, in one manifest save, the SSTables of levels 1 to 6 whose keys all lie in a range. The space comes back at once, with no rewrite. It ignores sequence numbers. Use it only for keys that you no longer read. See [Range Deletes](guides/range-deletes.md).
 
 ## Operations
 
 ### Write stall {#write-stall}
 
-A write stall slows writes down, or stops them, when compaction falls behind the flushes. Without it, level 0 would grow without limit, and each read would search more files. At 20 level 0 files, writes slow down to `DelayedWriteRate`. At 36, they stop until compaction catches up. See [Write Stalls](operations/write-stalls.md).
+A write stall slows writes down, or stops them, when compaction falls behind the flushes. It puts a limit on the growth of level 0, and on the number of files that each read must search. At 20 level 0 files, writes slow down to `DelayedWriteRate`. At 36, they stop until compaction catches up. See [Write Stalls](operations/write-stalls.md).
 
 ### Block cache {#block-cache}
 
-A block cache (`Cache`) holds the index and filter partitions of the SSTables, and evicts the least recently used. It puts a bound on the memory of the open tables, which otherwise grows with the data on disk. Several databases can share one. With `CacheDataBlocks`, it also holds the data blocks that reads take. See [Block Cache and Memtable Budget](guides/memory.md).
+A block cache (`Cache`) is memory for the index and filter partitions of the SSTables. It evicts the least recently used. It puts a bound on the memory of the open tables, which otherwise grows with the data on disk. Several databases can share one. With `CacheDataBlocks`, the data blocks that reads take go into the cache too. See [Block Cache and Memtable Budget](guides/memory.md).
 
 ### Memtable budget {#memtable-budget}
 
-A memtable budget (`WriteBufferManager`) caps the memtables of every database that shares it. Past the cap, the database that writes next flushes its own oldest memtable. It never stalls writes. See [Block Cache and Memtable Budget](guides/memory.md#the-memtable-budget).
+A memtable budget (`WriteBufferManager`) caps the total memtable memory of the databases that share it. Past the cap, the database that writes next flushes its oldest memtable. The budget never stalls writes. See [Block Cache and Memtable Budget](guides/memory.md#the-memtable-budget).
 
 ### Checkpoint {#checkpoint}
 
-A checkpoint is a consistent copy of the database in a new directory, as of one sequence number in every column family. It writes only the memtables, and links the SSTables with hard links. On the same file system, it is fast and takes little space. Writes to the source continue during the copy. See [Checkpoints](guides/checkpoints.md).
+A checkpoint is a consistent copy of the database in a new directory, as of one sequence number across all column families. It writes only the memtables, and links the SSTables with hard links. On the same file system, it is fast and takes little space. Writes to the source continue during the copy. See [Checkpoints](guides/checkpoints.md).
 
 ### Storage environment {#storage-environment}
 
-A storage environment does all the file I/O of the engine, like the `Env` of RocksDB. The default storage environment works on every platform that .NET 10 runs on. The tests use storage environments that simulate a power loss. See [Storage Environments](architecture/storage-environments.md).
+A storage environment does all the file I/O of the engine, like the `Env` of RocksDB. The default storage environment works on any platform with .NET 10. The tests use storage environments that simulate a power loss. See [Storage Environments](architecture/storage-environments.md).
 
 ### io_uring {#io-uring}
 
@@ -191,7 +191,7 @@ Raft is a consensus algorithm. It keeps the copies of a log on several nodes ide
 
 ### Kahuna {#kahuna}
 
-[Kahuna](https://kahunakv.github.io/) is a distributed key-value store for .NET, built on Kommander. A Kahuna node stores its key-value data and its Raft log on disk. `Solarium.Kahuna` holds both on Solarium. See [Solarium.Kahuna](integrations/kahuna.md).
+[Kahuna](https://kahunakv.github.io/) is a distributed key-value store for .NET, built on Kommander. A Kahuna node stores its key-value data and its Raft log on disk. With `Solarium.Kahuna`, Solarium stores both. See [Solarium.Kahuna](integrations/kahuna.md).
 
 ## Related topics
 

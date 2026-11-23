@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Getting Started
 
-This page takes you from an empty project to a database that holds data in two column families. At the end, you know how to open a database, write an atomic batch, read a key, iterate over a key range, and close the database safely. Then continue to the [guides](guides/column-families.md) for each feature.
+This page takes you from an empty project to a database with data in two column families. You open a database and write an atomic batch. Then you read a key, iterate over a key range, and close the database safely. After that, continue to the [guides](guides/column-families.md) for each feature.
 
 ## Requirements
 
@@ -13,13 +13,13 @@ This page takes you from an empty project to a database that holds data in two c
 
 ## Add Solarium to your project
 
-Add the store from NuGet:
+The store is the `SolariumDb` package on NuGet.
 
 ```shell
 dotnet add package SolariumDb
 ```
 
-Add the other packages only if you need them:
+The other packages are optional. Add one only if you need it.
 
 ```shell
 # The io_uring storage environment (Linux 6.1 or later)
@@ -29,13 +29,13 @@ dotnet add package SolariumDb.IoUring
 dotnet add package SolariumDb.Kommander
 ```
 
-The package IDs start with `SolariumDb`, because the ID `Solarium` on nuget.org belongs to a different project. Do not install it. The namespaces are `Solarium`, `Solarium.IoUring`, and `Solarium.Kommander`.
+The package IDs start with `SolariumDb`. The ID `Solarium` on nuget.org belongs to a different project. Do not install it. The namespaces are `Solarium`, `Solarium.IoUring`, and `Solarium.Kommander`.
 
 :::note Docs follow the main branch
 These docs follow the main branch of the [repository](https://github.com/solariumdb/solariumdb). A feature can reach the main branch before it reaches NuGet. To use the newest code, clone the repository and reference the projects, for example `dotnet add reference ../solariumdb/src/Solarium/Solarium.csproj`.
 :::
 
-To build and test the repository itself:
+You can also build and test the repository itself.
 
 ```shell
 git clone https://github.com/solariumdb/solariumdb.git
@@ -46,7 +46,7 @@ dotnet test
 
 ## Open a database
 
-A database is one directory. `SolariumDb.Open` creates the directory when it does not exist, because `DbOptions.CreateIfMissing` is true by default.
+A database is one directory. `SolariumDb.Open` creates the directory when it does not exist. `DbOptions.CreateIfMissing` controls this, and it is true by default.
 
 ```csharp
 using Solarium;
@@ -56,14 +56,14 @@ using SolariumDb db = SolariumDb.Open("./data",
     columnFamilies: ["metadata"]);
 ```
 
-Each part of this call:
+The call names the directory and the column families. The `using` declaration closes the database.
 
 - `"./data"` is the database directory. Only one open database can use it at a time. A `LOCK` file in the directory makes sure of this.
 - `CreateMissingColumnFamilies = true` creates the column families in `columnFamilies` that do not exist yet. When it is false, the default, a missing column family is an error, as in RocksDB.
-- `columnFamilies: ["metadata"]` names the column families that must exist. Every column family that exists already opens, even when you do not name it. The `default` column family always exists.
-- `using` disposes the database at the end of the scope. `Dispose` flushes the current WAL file, so every write before a clean close survives a power loss after it.
+- `columnFamilies: ["metadata"]` names the column families that must exist. The column families that exist already open too, even when you do not name them. The `default` column family always exists.
+- `using` disposes the database at the end of the scope. `Dispose` flushes the current WAL file. This means that every write before a clean close survives a power loss after it.
 
-You can create column families only when you open the database. There is no call to create or drop a column family on an open database.
+Column families are created when you open the database. There is no call to create or drop a column family on an open database.
 
 ## Get a column family
 
@@ -71,17 +71,17 @@ You can create column families only when you open the database. There is no call
 ColumnFamily metadata = db.GetColumnFamily("metadata");
 ```
 
-`GetColumnFamily` throws `KeyNotFoundException` when the database has no column family with that name. Each read and write method takes an optional `ColumnFamily`. When you pass none, the method uses the default column family.
+`GetColumnFamily` throws `KeyNotFoundException` when there is no column family with that name. Each read and write method takes an optional `ColumnFamily`. When you pass none, the method uses the default column family.
 
 ## Write
 
-A single write:
+`Put` writes one key.
 
 ```csharp
 db.Put("user:42"u8, "Ada"u8);
 ```
 
-An atomic batch across two column families:
+A `WriteBatch` groups operations into one atomic write, here across two column families.
 
 ```csharp
 db.Write(new WriteBatch()
@@ -90,7 +90,7 @@ db.Write(new WriteBatch()
     WriteOptions.Synced);
 ```
 
-The batch applies all its operations, or none of them. `WriteOptions.Synced` flushes the WAL before `Write` returns, so the batch survives a power loss. Without it, the write survives a process crash, but a power loss can lose it. [Writes and Batches](guides/writes-and-batches.md) explains the choice.
+The batch applies all its operations, or none of them. `WriteOptions.Synced` flushes the WAL before `Write` returns. This means that the batch survives a power loss. An unsynced write, the default, survives a process crash, but a power loss can lose it. [Writes and Batches](guides/writes-and-batches.md) explains the choice.
 
 Keys and values are bytes. The `u8` suffix of C# makes a UTF-8 byte span from a string literal. Keys sort by their bytes, as unsigned values.
 
@@ -103,7 +103,7 @@ byte[]? last = db.Get("last"u8, metadata);
 
 `Get` returns null when the key is absent or deleted. The returned array belongs to you.
 
-To read several keys at one snapshot, use `MultiGet`:
+`MultiGet` reads several keys at one snapshot.
 
 ```csharp
 byte[]?[] values = db.MultiGet(["user:42"u8.ToArray(), "user:43"u8.ToArray()]);
@@ -119,9 +119,9 @@ for (iterator.Seek("log:"u8); iterator.Valid(); iterator.Next())
     Console.WriteLine(Encoding.UTF8.GetString(iterator.Key()));
 ```
 
-The iterator reads a snapshot. It sees the data as it was when you created it. `Seek` moves to the first key at or after its target. The iterator stops before the first key at or after `IterateUpperBound`. Here, `;` is the byte after `:`, so the bound ends the `log:` prefix.
+The iterator reads a snapshot. It sees the data as it was when you created it. `Seek` moves to the first key at or after its target. The iterator stops before the first key at or after `IterateUpperBound`. Here, the bound ends the `log:` prefix, as `;` is the byte after `:`.
 
-Dispose each iterator. Until you dispose it, it keeps the SSTables of its snapshot open.
+Dispose each iterator. Until you dispose it, the SSTables of its snapshot stay open.
 
 ## Delete
 
@@ -130,7 +130,7 @@ db.Delete("user:42"u8);
 db.DeleteRange("log:0000"u8, "log:0001"u8);
 ```
 
-`DeleteRange` deletes every key from the begin key up to the end key. The begin key is included and the end key is excluded. It writes one range tombstone for the whole range.
+`DeleteRange` deletes every key from the begin key up to the end key. The begin key is included and the end key is excluded. It writes one range tombstone for the range.
 
 ## The complete program
 
@@ -160,7 +160,7 @@ db.DeleteRange("log:0001"u8, "log:0002"u8);
 Console.WriteLine(db.Get("log:0001"u8) is null ? "log:0001 is deleted" : "log:0001 is still there");
 ```
 
-The output:
+The program prints the last id and the two log entries. The last line shows that the range delete removed the first entry.
 
 ```text
 0002
@@ -169,15 +169,15 @@ log:0002 = second
 log:0001 is deleted
 ```
 
-Run the program a second time. The database opens with the data of the first run, because the WAL replays at open.
+Run the program a second time. The WAL replays at open, and the database has the data of the first run.
 
 ## What is in the directory
 
-After the first run, the directory holds these files:
+After the first run, the data is in a WAL file. An SSTable appears after a memtable flush.
 
 | File | Content |
 | --- | --- |
-| `LOCK` | An exclusive lock, so that only one open database uses the directory. |
+| `LOCK` | An exclusive lock. Only one open database can use the directory. |
 | `FORMAT` | The format version. |
 | `MANIFEST` | The column families, their SSTables, and the live WAL files. |
 | `NNNNNN.log` | A WAL file. |
@@ -187,7 +187,7 @@ Do not change these files by hand. [Data Directory](reference/data-directory.md)
 
 ## Next steps
 
-- [Column Families](guides/column-families.md): plan your key spaces and give each its own options.
+- [Column Families](guides/column-families.md): plan your key spaces and set the options of each one.
 - [Writes and Batches](guides/writes-and-batches.md): choose between synced and unsynced writes.
 - [Reads and Iterators](guides/reads-and-iterators.md): snapshots, bounds, and backward iteration.
 - [Solarium.Kommander](integrations/kommander.md): use Solarium as the Raft log of Kommander.

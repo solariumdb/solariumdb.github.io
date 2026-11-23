@@ -13,25 +13,25 @@ This page tells you what a write survives, and what the database does at open af
 | Process crash, after `Write` returns | Survives | Survives |
 | Power loss, after `Write` returns | Survives | Can be lost |
 | Power loss, after a clean `Dispose` | Survives | Survives |
-| Crash during `Write` | The batch is there whole, or not at all | The batch is there whole, or not at all |
+| Crash during `Write` | All of the batch is there, or none of it | All of the batch is there, or none of it |
 
-The reasons:
+The WAL explains these results. A write is in the WAL before `Write` returns.
 
 - A **synced** write (`WriteOptions.Sync`) flushes the WAL to the device before `Write` returns.
-- An **unsynced** write is in the WAL file in the operating system when `Write` returns. The operating system keeps it when the process dies, but a power loss can lose it. This is the same as in RocksDB.
-- `Dispose` flushes the current WAL file. So after a clean close, every write survives a power loss. In RocksDB, unsynced writes need `SyncWAL` before the close.
-- A batch is one WAL record with a checksum. Recovery replays a record whole, or drops it whole.
+- An **unsynced** write is in the WAL file in the operating system when `Write` returns. It survives when the process dies, but a power loss can lose it. This is the same as in RocksDB.
+- `Dispose` flushes the current WAL file. This means that after a clean close, every write survives a power loss. In RocksDB, unsynced writes need `SyncWAL` before the close.
+- A batch is one WAL record with a checksum. Recovery replays all of a record, or drops all of it.
 
 ## Process crash and power loss
 
-- A **process crash** can only cut the last write short. The operating system keeps everything else that the process wrote.
-- A **power loss** can lose any sector written since the last flush, in any order. So the newest WAL file can end with damage that has intact records after it.
+- A **process crash** can only cut the last write short. Everything else that the process wrote survives in the operating system.
+- A **power loss** can lose any sector written since the last flush, in any order. This means that the newest WAL file can end with damage that has intact records after it.
 
 Solarium tells these two cases apart. Each WAL record carries the **durable offset** of its file: how much of the file a completed flush made durable when the record was appended.
 
 ## What recovery does at open
 
-At open, the WAL files replay in order, and the entries that an SSTable already holds are skipped. Then recovery decides what to do with any damage that it finds:
+At open, the WAL files replay in order. The replay skips the entries that are already in an SSTable. When recovery finds damage, its place in the WAL decides the result.
 
 ```mermaid
 flowchart TD
@@ -43,15 +43,15 @@ flowchart TD
     C -- Yes: no crash explains it --> F2[Open fails and drops no data]
 ```
 
-The open also fails, and changes nothing, for a directory with data files but no `MANIFEST`. A crash during a flush or a compaction leaves orphan files, and the next open deletes them. [WAL and Recovery](../architecture/wal-and-recovery.md#recovery-rules) gives the exact rules. Damage in the WAL or the manifest throws `SolariumException` with `IsCorruption` set.
+The open also fails for a directory with data files but no `MANIFEST`, and changes nothing. A crash during a flush or a compaction leaves orphan files, and the next open deletes them. [WAL and Recovery](../architecture/wal-and-recovery.md#recovery-rules) gives the exact rules. Damage in the WAL or the manifest throws `SolariumException` with `IsCorruption` set.
 
 ## Damage in the last synced group
 
-The cut drops a synced write only when flushed data was damaged in a way that no crash causes, and no record was written after it. That is damage inside the last synced group of the file, with nothing appended since. Then nothing in the file shows that the group was flushed. A WAL file cut after its fsync is one such case.
+The cut drops a synced write in one case only. Flushed data of the last synced group of the file was damaged in a way that no crash causes, and no record was written after that group. The file then does not show that the group was flushed. A WAL file cut after its fsync is one such case.
 
 To find this case, keep a proof outside the WAL. After a synced write, [`WriteBatch.GroupLastSequence`](../guides/writes-and-batches.md#know-what-a-synced-write-made-durable) tells which sequence numbers are durable. At open, compare the number that you recorded with `LatestSequenceNumber`. [`SolariumWAL`](../integrations/kommander.md#storage-damage) does this with its sync ledger.
 
-RocksDB has two recovery modes for this case:
+RocksDB has two recovery modes for this case, `TolerateCorruptedTailRecords` and `PointInTimeRecovery`.
 
 - `TolerateCorruptedTailRecords`, which Kommander uses, fails the open after any power loss that left such a hole.
 - `PointInTimeRecovery` drops everything after the first damage, whatever its cause.
@@ -60,9 +60,9 @@ Solarium opens after every kind of power loss that its tests simulate, and fails
 
 ## Damage to an SSTable
 
-A misdirected write can put a whole, valid block at the place of another block. A copy can replace a table file with another valid table. Each block then passes a plain checksum, and a read could answer "not found" for a key that the store holds. Solarium checks each table and each block against the place where it must be, and reports a mismatch as **corruption**.
+A misdirected write can put a complete, valid block at the place of another block. A copy can replace a table file with another valid table. Each block then passes a checksum of its bytes, and a read could answer "not found" for a key that is in the store. Solarium checks each table and each block against the place where it must be. A mismatch is **corruption**.
 
-A crash or a power loss does not explain this damage. A table file is written once, flushed before the manifest names it, and never written again. So recovery cuts nothing here, and a retry fails the same way. The data must come from another copy:
+A crash or a power loss does not explain this damage. A table file is written once and flushed before the manifest names it, and it does not change after that. Recovery does not cut anything here, and a retry fails the same way. You must take the data from another copy, and `IsCorruption` tells you when.
 
 ```csharp
 try
@@ -75,31 +75,31 @@ catch (SolariumException exception) when (exception.IsCorruption)
 }
 ```
 
-`IsCorruption` is false for a failure of the storage itself, such as a full disk. An exception that wraps a corruption, such as a write refused after a compaction met one, is a corruption too.
+`IsCorruption` is false for a failure of the storage itself, such as a full disk. Some exceptions wrap a corruption, for example when a write fails after a compaction met one. `IsCorruption` is true for those too.
 
 | When | What is checked |
 | --- | --- |
-| At open, for each table | The footer: its magic number, version, and CRC-32. Every block except the data blocks, against its checksum. Each index partition, against the key that the top-level index holds for it. Then the table against its record in the manifest: the table id, the size, the entry count, the sequence numbers, and the key range. |
-| At each read of a data block from the file, by `Get`, `MultiGet`, an iterator, or a compaction | The checksum of the block. Its last key, which must equal its index entry. Its first key, which must come after the block before it. Every length, count, and entry kind that the read decodes. |
+| At open, for each table | The footer: its magic number, version, and CRC-32. The checksum of each block that is not a data block. Each index partition, against its key in the top-level index. Then the table against its record in the manifest: the table id, the size, the entry count, the sequence numbers, and the key range. |
+| At each read of a data block from the file, by `Get`, `MultiGet`, an iterator, or a compaction | The checksum of the block. Its last key, which must equal its index entry. Its first key, which must come after the block before it. The lengths and counts that the read decodes, and the entry kinds. |
 
-What happens when a check fails:
+The result of a failed check depends on the operation.
 
-- **An open** fails when a table is not the one that the manifest records. This happens before the open replays the WAL or saves the manifest, so every file that the manifest lists stays as it was.
-- **A read** fails, and nothing else changes. Other keys still read.
+- **An open** fails when a table is not the one that the manifest records. This happens before the open replays the WAL or saves the manifest. The files that the manifest lists do not change.
+- **A read** fails. This does not change the database, and reads of other keys work.
 - **A compaction** stops the writes of the database, as any compaction failure does. See [Storage Failures](storage-failures.md#corruption).
 
-The limits of these checks:
+These checks have limits for older tables, for the middle of a block, and for cached blocks.
 
-- A table written before table version 5 has no table id, and its checksums are not bound to the table or the offset. The key checks still find a misplaced block, and the open still compares the other fields of the record.
-- In a version 5 data block, the check decodes the first and the last entries only. The entries between them are decoded, and refused if they do not decode, when a read reaches them.
+- A table written before table version 5 does not have a table id, and its checksums are not bound to the table or the offset. The key checks find a misplaced block in such a table too, and the open compares the other fields of the record.
+- In a version 5 data block, the check decodes the first and the last entries only. A read that reaches the entries between them decodes them, and fails if they do not decode.
 - A block in the block cache is not checked again. It passed these checks before it went in.
 
 [SSTables](../architecture/sstables.md#how-a-table-proves-its-place) explains how the checksums are bound.
 
 ## After a failure while running
 
-A WAL, flush, or compaction failure stops all later writes until you open the database again. After a failed append, the tail of the WAL is unknown, so the database does not write after it. Reads continue. See [Storage Failures](storage-failures.md).
+A WAL failure stops all later writes until you open the database again. A flush failure and a compaction failure have the same effect. After a failed append, the tail of the WAL is unknown, and the database does not write after it. Reads continue. See [Storage Failures](storage-failures.md).
 
 ## How it is tested
 
-The [power-loss tests and the kill tests](testing.md) check these rules. They cut the power or kill a process at random points of a random workload, reopen the database, and check that it holds exactly the batches that it must hold.
+The [power-loss tests and the kill tests](testing.md) check these rules. They cut the power or kill a process at random points of a random workload. After a reopen, they check that the database has exactly the batches that it must have.
